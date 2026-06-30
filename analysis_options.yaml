@@ -1,0 +1,20 @@
+# Static analysis configuration for OwnPay Console.
+# Stricter than the Flutter default: treat sloppy code as errors, never ship `print`.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-raw-types: true
+  errors:
+    avoid_print: error
+    avoid_dynamic_calls: error
+    # generated/none — keep the bar high; warnings fail CI when run with --fatal-warnings.
+
+linter:
+  rules:
+    - prefer_final_locals
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - unawaited_futures
+    - avoid_print

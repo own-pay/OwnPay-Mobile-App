@@ -1,0 +1,59 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+docs/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.log
+
+# Generated code (if ever introduced via build_runner)
+*.g.dart
+*.freezed.dart
+*.config.dart
+*.mocks.dart
+
+# IDE / tooling
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.history/
+
+# Android
+android/.gradle/
+android/captures/
+android/local.properties
+android/key.properties        # signing config — NEVER commit
+*.keystore
+*.jks
+*.md
+ARCHITECTURE.md
+CLAUDE.md
+DESIGN.md
+android/app/google-services.json   # must not exist (no Firebase) — guard anyway
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/ephemeral/
+*.mobileprovision
+*.p12
+
+# Obfuscation symbols / debug info (archive separately for crash de-obfuscation)
+build/symbols/
+app.*.symbols
+
+# Secrets / env
+.env
+.env.*
+*.secret
+
+# OS noise
+.DS_Store
+Thumbs.db
