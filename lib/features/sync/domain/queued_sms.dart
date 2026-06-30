@@ -1,7 +1,8 @@
 import 'package:equatable/equatable.dart';
 
-/// Lifecycle of a queued SMS as it syncs to the server.
-enum SyncStatus { pending, syncing, approved, failed }
+/// Lifecycle of a queued SMS as it syncs to the server. Serialized by name (not index), so the set
+/// can evolve without corrupting already-stored rows.
+enum SyncStatus { pending, approved, failed }
 
 /// A gate-passed SMS awaiting (or having completed) sync. Holds only the **encrypted** payload —
 /// the plaintext body never reaches the queue.
@@ -50,11 +51,14 @@ class QueuedSms extends Equatable {
       );
 
   /// The wire shape for `POST /api/mobile/v1/sms`.
+  ///
+  /// `received_at` is serialized in **UTC** (trailing `Z`) — the device clock is local, and a naive
+  /// local timestamp would be misread by the server (CLAUDE.md §5: ISO-8601 with timezone).
   Map<String, dynamic> toApi() => <String, dynamic>{
         'local_id': localId,
         'encrypted_payload': encryptedPayload,
         'sender': sender,
-        'received_at': receivedAt.toIso8601String(),
+        'received_at': receivedAt.toUtc().toIso8601String(),
       };
 
   /// Hive-friendly map (primitives only — avoids type adapters / codegen).
@@ -64,25 +68,34 @@ class QueuedSms extends Equatable {
         'sender': sender,
         'received_at': receivedAt.toIso8601String(),
         'created_at': createdAt.toIso8601String(),
-        'status': status.index,
+        'status': status.name,
         'failure_reason': failureReason,
         'retry_count': retryCount,
         'server_ref': serverRef,
       };
 
   factory QueuedSms.fromMap(Map<String, dynamic> m) {
-    final int statusIndex = m['status'] is int ? m['status'] as int : 0;
     return QueuedSms(
       localId: m['local_id'] is int ? m['local_id'] as int : int.parse('${m['local_id']}'),
       encryptedPayload: '${m['encrypted_payload']}',
       sender: '${m['sender']}',
       receivedAt: DateTime.tryParse('${m['received_at']}') ?? DateTime.fromMillisecondsSinceEpoch(0),
       createdAt: DateTime.tryParse('${m['created_at']}') ?? DateTime.fromMillisecondsSinceEpoch(0),
-      status: SyncStatus.values[statusIndex.clamp(0, SyncStatus.values.length - 1)],
+      status: _statusFromName(m['status']),
       failureReason: m['failure_reason'] as String?,
       retryCount: m['retry_count'] is int ? m['retry_count'] as int : 0,
       serverRef: m['server_ref'] as String?,
     );
+  }
+
+  /// Maps a stored status name back to the enum, defaulting to [SyncStatus.pending] for any
+  /// missing/unknown value (so a row is re-synced rather than lost).
+  static SyncStatus _statusFromName(Object? v) {
+    final String name = '$v';
+    for (final SyncStatus s in SyncStatus.values) {
+      if (s.name == name) return s;
+    }
+    return SyncStatus.pending;
   }
 
   @override

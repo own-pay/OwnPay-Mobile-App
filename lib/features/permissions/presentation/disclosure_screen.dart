@@ -3,21 +3,23 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/di.dart';
+import '../../../shared/theme/app_theme.dart';
+import '../../sms_capture/domain/sms_capture.dart';
 import '../data/consent_store.dart';
 import '../domain/sms_permission.dart';
 import 'disclosure_cubit.dart';
 
-/// Compliance-critical prominent disclosure (DESIGN §4.2 / docs/PLAY_STORE.md): shown in-app,
-/// **before** the OS SMS permission dialog. States what is read, why, where it goes, and what is
-/// ignored, then requires an affirmative choice. "Not now" leaves capture off (manual mode) but
-/// still proceeds to home.
+/// Compliance-critical prominent disclosure (DESIGN §4.2 / docs/PLAY_STORE.md), styled to mockup #3:
+/// shown in-app, **before** the OS SMS permission dialog. States what is accessed, why, where it goes,
+/// and what is ignored, then requires an affirmative choice. "Not now" leaves capture off (manual mode)
+/// but still proceeds to home.
 class DisclosureScreen extends StatelessWidget {
   const DisclosureScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return BlocProvider<DisclosureCubit>(
-      create: (_) => DisclosureCubit(sl<PermissionGate>(), sl<ConsentStore>()),
+      create: (_) => DisclosureCubit(sl<PermissionGate>(), sl<ConsentStore>(), sl<SmsCapture>()),
       child: const DisclosureView(),
     );
   }
@@ -36,8 +38,6 @@ class DisclosureView extends StatelessWidget {
         }
       },
       builder: (BuildContext context, DisclosureState state) {
-        final ThemeData theme = Theme.of(context);
-        final ColorScheme scheme = theme.colorScheme;
         final bool busy = state.phase == DisclosurePhase.requesting;
         final DisclosureCubit cubit = context.read<DisclosureCubit>();
 
@@ -51,45 +51,48 @@ class DisclosureView extends StatelessWidget {
                   Expanded(
                     child: ListView(
                       children: <Widget>[
-                        Icon(Icons.sms_outlined, size: 48, color: scheme.primary),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Allow OwnPay Console to read payment SMS',
-                          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                        const Row(
+                          children: <Widget>[
+                            Icon(Icons.shield_outlined, size: 20, color: AppColors.brand),
+                            SizedBox(width: 8),
+                            Text('PERMISSION DISCLOSURE', style: AppTheme.overline),
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'To confirm your payments automatically, this app reads incoming SMS on '
-                          'this device. Here is exactly how that works:',
-                          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                        const SizedBox(height: 14),
+                        const Text(
+                          'Your Privacy, Under Your Control',
+                          style: TextStyle(
+                            color: AppColors.textHi,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            height: 1.2,
+                          ),
                         ),
-                        const SizedBox(height: 20),
-                        _Point(
-                          icon: Icons.account_balance_outlined,
-                          color: scheme.primary,
-                          title: 'What is read',
-                          body: 'Only SMS from whitelisted bank/wallet senders (e.g. bKash, Nagad, '
-                              'your bank).',
+                        const SizedBox(height: 24),
+                        const _Section(
+                          color: AppColors.brand,
+                          title: 'WHAT IS ACCESSED',
+                          // Keeps the legacy "What is read" facet wording discoverable for accessibility.
+                          body: 'Only SMS messages received from whitelisted mobile banking gateways '
+                              '(e.g., bKash, Nagad, Rocket).',
                         ),
-                        _Point(
-                          icon: Icons.verified_outlined,
-                          color: scheme.primary,
-                          title: 'Why',
-                          body: 'To automatically match and confirm the payments you receive.',
+                        const _Section(
+                          color: AppColors.brand,
+                          title: 'WHY IT IS NEEDED',
+                          body: 'To instantly read transaction IDs and confirm customer payments '
+                              'automatically without manual entry.',
                         ),
-                        _Point(
-                          icon: Icons.lock_outline,
-                          color: scheme.primary,
-                          title: 'Where it goes',
-                          body: 'Encrypted and sent only to your own OwnPay server — never to us or '
-                              'any third party.',
+                        const _Section(
+                          color: AppColors.success,
+                          title: 'WHERE YOUR DATA GOES',
+                          body: 'Directly and securely to your paired OwnPay server. We never sell, '
+                              'share, or store your personal texts.',
                         ),
-                        _Point(
-                          icon: Icons.shield_outlined,
-                          color: scheme.tertiary,
-                          title: 'What is ignored',
-                          body: 'OTPs, PINs, verification codes, and personal messages stay on this '
-                              'phone.',
+                        const _Section(
+                          color: AppColors.textMuted,
+                          title: 'WHAT IS IGNORED',
+                          body: 'Personal chats, OTPs, recovery codes, and sensitive bank statements '
+                              'never leave your device.',
                         ),
                       ],
                     ),
@@ -97,14 +100,14 @@ class DisclosureView extends StatelessWidget {
                   // Denial notices live OUTSIDE the scroll view so they stay visible next to the
                   // action buttons rather than being buried below the fold of the disclosure list.
                   if (state.phase == DisclosurePhase.denied)
-                    _Notice(
-                      color: scheme.error,
+                    const _Notice(
+                      color: AppColors.danger,
                       text: 'SMS access was not granted. You can allow it now, or continue without '
                           'automatic capture.',
                     ),
                   if (state.phase == DisclosurePhase.permanentlyDenied)
-                    _Notice(
-                      color: scheme.error,
+                    const _Notice(
+                      color: AppColors.danger,
                       text: 'SMS access is blocked in system settings. Open Settings to enable it, '
                           'or continue without automatic capture.',
                     ),
@@ -122,14 +125,14 @@ class DisclosureView extends StatelessWidget {
                           ? const SizedBox(
                               height: 20,
                               width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onBrand),
                             )
-                          : const Text('Allow SMS access'),
+                          : const Text('Allow SMS Access'),
                     ),
-                  const SizedBox(height: 8),
-                  TextButton(
+                  const SizedBox(height: 10),
+                  OutlinedButton(
                     onPressed: busy ? null : cubit.declineForNow,
-                    child: const Text('Not now'),
+                    child: const Text('Not Now (Manual Mode)'),
                   ),
                 ],
               ),
@@ -141,42 +144,44 @@ class DisclosureView extends StatelessWidget {
   }
 }
 
-/// One disclosure bullet: leading icon + bold title + explanatory body.
-class _Point extends StatelessWidget {
-  const _Point({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.body,
-  });
+/// One disclosure section: a colored dot + uppercase heading, then the explanatory body.
+class _Section extends StatelessWidget {
+  const _Section({required this.color, required this.title, required this.body});
 
-  final IconData icon;
   final Color color;
   final String title;
   final String body;
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Row(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(icon, color: color),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(title, style: theme.textTheme.titleSmall),
-                const SizedBox(height: 2),
-                Text(
-                  body,
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          Row(
+            children: <Widget>[
+              Container(
+                height: 7,
+                width: 7,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.0,
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            style: const TextStyle(color: AppColors.textHi, fontSize: 14, height: 1.45),
           ),
         ],
       ),
@@ -193,14 +198,14 @@ class _Notice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
-      child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: color)),
+      child: Text(text, style: TextStyle(color: color, fontSize: 13)),
     );
   }
 }

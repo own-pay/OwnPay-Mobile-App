@@ -15,9 +15,11 @@ class OwnPayConsoleApp extends StatelessWidget {
     return MaterialApp.router(
       title: 'OwnPay Console',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
+      // One cohesive dark theme, always — the console look is part of the product identity (DESIGN.md).
+      // Both slots point at the dark theme so the frame never flashes light before themeMode is applied.
+      theme: AppTheme.dark(),
       darkTheme: AppTheme.dark(),
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       routerConfig: router,
     );
   }

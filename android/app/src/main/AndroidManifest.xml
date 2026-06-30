@@ -1,13 +1,30 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Required for all network calls in release builds (Flutter only adds INTERNET to the
-         debug/profile manifests). SMS, foreground-service, and notification permissions are added
-         alongside the native SMS receiver in a later increment. -->
+         debug/profile manifests). -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Camera permission for QR scanning -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- Core SMS-capture function (Play "SMS-based financial transactions" exception). READ_SMS +
+         RECEIVE_SMS are requested at runtime ONLY AFTER the in-app prominent disclosure (DESIGN §4.2). -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+
+    <!-- Persistent monitoring foreground service + its ongoing notification + restart after reboot. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:label="OwnPay Console"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"><!-- SECURITY.md §4/§5: no auto-backup, HTTPS only.
+             Debug builds override usesCleartextTraffic (see src/debug/AndroidManifest.xml). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -35,6 +52,39 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- ML Kit barcode model (unbundled variant, see android/gradle.properties): ask Google Play
+             to download the barcode-scanning model when the app is installed, so the first QR scan
+             does not have to wait for / fail on an on-demand download. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode" />
+
+        <!-- Native SMS capture: a foreground monitoring service, a manifest SMS receiver (fires even
+             when the UI/engine is dead), and a boot receiver that restarts the service. -->
+        <service
+            android:name=".SmsMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

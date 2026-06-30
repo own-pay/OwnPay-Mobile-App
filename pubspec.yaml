@@ -46,6 +46,7 @@ dependencies:
   flutter_local_notifications: ^22.0.1
   connectivity_plus: ^7.1.1
   cryptography: ^2.9.0
+  crypto: ^3.0.3
   decimal: ^3.2.4
   equatable: ^2.0.8
   permission_handler: ^12.0.3
@@ -63,6 +64,20 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   bloc_test: ^10.0.0
   mocktail: ^1.0.5
+  # Build-time only: generates the launcher/adaptive/iOS icons from assets/icon/* (see config below).
+  flutter_launcher_icons: ^0.14.3
+
+# App icon generation (run: dart run flutter_launcher_icons). Source art in assets/icon/.
+# Adaptive (API 26+): navy ring foreground on a white background. Legacy/iOS: white-flattened icon.
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: true
+  remove_alpha_ios: true
+  background_color_ios: "#FFFFFF"
+  image_path: "assets/icon/app_icon_legacy.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
+  min_sdk_android: 24
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

@@ -34,6 +34,11 @@ class SecureStore {
   Future<void> setAccessToken(String value) => _storage.write(key: AppConfig.ssAccessToken, value: value);
   Future<void> setRefreshToken(String value) => _storage.write(key: AppConfig.ssRefreshToken, value: value);
 
+  /// TOFU-pinned server certificate fingerprint (release cert pinning). Cleared by [clear] on wipe, so a
+  /// re-pair re-pins (the documented re-pin path for server cert rotation).
+  Future<String?> readCertPin() => _storage.read(key: AppConfig.ssCertPin);
+  Future<void> setCertPin(String value) => _storage.write(key: AppConfig.ssCertPin, value: value);
+
   /// True once a device has paired (has both a server and an access token).
   Future<bool> isPaired() async {
     final String? server = await readServerUrl();
@@ -41,10 +46,17 @@ class SecureStore {
     return server != null && server.isNotEmpty && token != null && token.isNotEmpty;
   }
 
+  Future<String>? _deviceIdInFlight;
+
   /// Returns a stable, locally-generated device id (persisted on first use). Sent at pairing so the
   /// server can pin this device. A future native enhancement can augment it with the signing-cert
   /// hash; this CSPRNG id is sufficient as a stable per-install identifier.
-  Future<String> getOrCreateDeviceId() async {
+  ///
+  /// Single-flight: concurrent first-callers share one in-flight read/create, so two simultaneous
+  /// callers can never mint and persist two different ids.
+  Future<String> getOrCreateDeviceId() => _deviceIdInFlight ??= _readOrCreateDeviceId();
+
+  Future<String> _readOrCreateDeviceId() async {
     final String? existing = await _storage.read(key: AppConfig.ssDeviceId);
     if (existing != null && existing.isNotEmpty) return existing;
     final Random rng = Random.secure();
@@ -53,6 +65,10 @@ class SecureStore {
     return id;
   }
 
-  /// Secure-wipe everything (used on revoke / re-pair).
-  Future<void> clear() => _storage.deleteAll();
+  /// Secure-wipe everything (used on revoke / re-pair). Also drops the cached device-id future so a
+  /// subsequent pair mints a fresh id (the documented re-pair behavior).
+  Future<void> clear() async {
+    _deviceIdInFlight = null;
+    await _storage.deleteAll();
+  }
 }

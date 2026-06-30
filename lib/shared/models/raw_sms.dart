@@ -12,6 +12,20 @@ class RawSms extends Equatable {
     required this.receivedAt,
   });
 
+  /// Builds a [RawSms] from the native capture-channel payload `{sender, body, ts}`, where `ts` is
+  /// epoch milliseconds. Tolerant of missing/mistyped fields (defaults to empty / epoch) so a
+  /// malformed platform message degrades gracefully instead of throwing inside the capture pipeline.
+  factory RawSms.fromChannel(Map<Object?, Object?> map) {
+    final Object? sender = map['sender'];
+    final Object? body = map['body'];
+    final Object? ts = map['ts'];
+    return RawSms(
+      sender: sender is String ? sender : '',
+      body: body is String ? body : '',
+      receivedAt: DateTime.fromMillisecondsSinceEpoch(ts is int ? ts : 0),
+    );
+  }
+
   /// Originating sender id / shortcode (e.g. `bKash`, `16247`).
   final String sender;
 

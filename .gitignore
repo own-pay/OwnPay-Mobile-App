@@ -4,6 +4,7 @@
 .pub-cache/
 .pub/
 build/
+docs/
 .flutter-plugins
 .flutter-plugins-dependencies
 *.log
@@ -29,6 +30,10 @@ android/local.properties
 android/key.properties        # signing config — NEVER commit
 *.keystore
 *.jks
+*.md
+ARCHITECTURE.md
+CLAUDE.md
+DESIGN.md
 android/app/google-services.json   # must not exist (no Firebase) — guard anyway
 
 # iOS

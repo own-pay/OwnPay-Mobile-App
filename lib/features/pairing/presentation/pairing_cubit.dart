@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/error/failure.dart';
 import '../../../core/network/api_result.dart';
+import '../../../core/services/session_status.dart';
 import '../data/device_repository.dart';
 
 enum PairingStatus { idle, submitting, success, failure }
@@ -18,9 +19,10 @@ class PairingState extends Equatable {
 }
 
 class PairingCubit extends Cubit<PairingState> {
-  PairingCubit(this._devices) : super(const PairingState());
+  PairingCubit(this._devices, this._session) : super(const PairingState());
 
   final DeviceRepository _devices;
+  final SessionStatus _session;
 
   Future<void> pair({
     required String serverUrl,
@@ -45,6 +47,7 @@ class PairingCubit extends Cubit<PairingState> {
 
     switch (result) {
       case Ok<void>():
+        _session.clear(); // re-pair succeeded → drop the re-auth-required redirect
         emit(const PairingState(status: PairingStatus.success));
       case Err<void>(:final Failure failure):
         emit(PairingState(status: PairingStatus.failure, error: failure.message));

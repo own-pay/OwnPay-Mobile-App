@@ -35,8 +35,26 @@ class FilterRules extends Equatable {
   /// True when there is no usable whitelist — the gate must drop everything.
   bool get isFailClosed => allowedSenders.isEmpty;
 
-  /// Whether the cached rules are older than their refresh cadence.
-  bool isStale(DateTime now) => now.difference(fetchedAt) >= Duration(hours: checkIntervalHours);
+  /// Returns a copy with a different sender whitelist, keeping every other field. Used to apply the
+  /// on-device sender overrides (a user may locally DISABLE a server-whitelisted sender — a strictly
+  /// subtractive change, so it can only narrow what the gate forwards, never widen it).
+  FilterRules withAllowedSenders(List<String> senders) => FilterRules(
+        version: version,
+        allowedSenders: senders,
+        positiveKeywords: positiveKeywords,
+        negativeKeywords: negativeKeywords,
+        checkIntervalHours: checkIntervalHours,
+        fetchedAt: fetchedAt,
+      );
+
+  /// Whether the cached rules are older than their refresh cadence. A non-positive
+  /// `check_interval_hours` (a misconfigured/garbled server value) would make every check "stale" —
+  /// forcing a refetch on every drain and a fail-closed drop on every drain while offline — so it
+  /// falls back to the 24h default.
+  bool isStale(DateTime now) {
+    final int hours = checkIntervalHours < 1 ? 24 : checkIntervalHours;
+    return now.difference(fetchedAt) >= Duration(hours: hours);
+  }
 
   /// Parses the server response. [fetchedAt] is stamped by the caller (the device clock at fetch).
   factory FilterRules.fromApi(Map<String, dynamic> json, {required DateTime fetchedAt}) => FilterRules(

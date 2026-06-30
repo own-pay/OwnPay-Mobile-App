@@ -67,10 +67,13 @@ class DeviceRepository {
       return false;
     }
 
+    // The server re-checks the device fingerprint it bound at pairing (sha256 of the device id). Send
+    // the same stable id we paired with, or refresh is rejected (FINGERPRINT_REQUIRED/MISMATCH → 422).
+    final String deviceId = await _store.getOrCreateDeviceId();
     final ApiResult<Map<String, dynamic>> res = await _api.post(
       '$base${AppConfig.apiPrefix}/devices/token-refreshes',
       auth: false,
-      body: <String, dynamic>{'refresh_token': refreshToken},
+      body: <String, dynamic>{'refresh_token': refreshToken, 'fingerprint': deviceId},
     );
 
     switch (res) {
@@ -84,6 +87,24 @@ class DeviceRepository {
         if (rotated.isNotEmpty) await _store.setRefreshToken(rotated);
         return true;
     }
+  }
+
+  /// Self-revokes this device on the server (authenticated `DELETE /devices/{id}`). The server identifies
+  /// the device from the JWT, so `{id}` carries our stored uuid for clarity. Best-effort: the settings
+  /// "revoke & wipe" flow clears local data regardless of the result.
+  Future<ApiResult<void>> revoke() async {
+    final String? base = await _store.readServerUrl();
+    if (base == null || base.isEmpty) {
+      return const Err<void>(ValidationFailure(message: 'This device is not paired.'));
+    }
+    final String? uuid = await _store.readDeviceUuid();
+    final String id = (uuid != null && uuid.isNotEmpty) ? uuid : 'self';
+    final ApiResult<Map<String, dynamic>> res =
+        await _api.delete('$base${AppConfig.apiPrefix}/devices/$id');
+    return res.fold<ApiResult<void>>(
+      (Failure failure) => Err<void>(failure),
+      (Map<String, dynamic> _) => const Ok<void>(null),
+    );
   }
 
   /// Normalizes a user-entered/scanned origin: adds https:// if no scheme, strips trailing slashes,

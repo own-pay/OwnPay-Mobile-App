@@ -17,7 +17,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Stable, unique application id for OwnPay Console (also the Play package name).
         applicationId = "org.ownpay.console"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -29,9 +29,20 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Release is debug-signed for now so `flutter run/build --release` works without the
+            // production upload keystore. Swapping in the user's key is a release-time task (see
+            // mobile-app/HANDOFF.md) and is independent of the R8 config below.
             signingConfig = signingConfigs.getByName("debug")
+
+            // R8: shrink + optimize + obfuscate the release build. The keep rules that preserve
+            // ML Kit, CameraX, the Flutter embedding and the app's manifest-referenced native
+            // classes live in proguard-rules.pro — without them R8 would strip the barcode scanner.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
@@ -48,4 +59,6 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // NotificationCompat + foreground-service helpers used by SmsMonitorService.
+    implementation("androidx.core:core-ktx:1.13.1")
 }

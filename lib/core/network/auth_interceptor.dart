@@ -53,6 +53,11 @@ class AuthInterceptor extends Interceptor {
       final Response<dynamic> response = await _dio.fetch<dynamic>(retryOptions);
       handler.resolve(response);
     } on DioException catch (retryError) {
+      // The refresh SUCCEEDED — the refresh token is valid, so the session is alive. The retried request
+      // failing anyway (e.g. a transient 401 during the startup request burst) must NOT be escalated to a
+      // dead-session re-pair: mark it so the client maps it to a retryable error instead of AuthFailure.
+      // Otherwise a one-off blip strands the user on the re-pair screen even though their session is fine.
+      retryError.requestOptions.extra['authRecovered'] = true;
       handler.next(retryError);
     }
   }

@@ -12,8 +12,9 @@ class AppConfig {
   /// Notification poll cadence (server may override via dashboard config).
   static const Duration notificationPollInterval = Duration(seconds: 12);
 
-  /// Default privacy-rules refresh cadence (server value in `check_interval_hours` wins).
-  static const Duration defaultFilterRulesRefresh = Duration(hours: 24);
+  /// Heartbeat cadence — keeps this device shown as "online" in the admin panel. Must stay comfortably
+  /// under the server's online window (a few minutes) so a single missed beat doesn't flip it to "Idle".
+  static const Duration heartbeatInterval = Duration(seconds: 60);
 
   /// HTTP timeouts.
   static const Duration connectTimeout = Duration(seconds: 15);
@@ -38,4 +39,7 @@ class AppConfig {
   static const String ssServerUrl = 'server_url';
   static const String ssDeviceUuid = 'device_uuid';
   static const String ssDeviceId = 'device_id_local';
+
+  /// TOFU-pinned server leaf-cert SHA-256 fingerprint (release cert pinning).
+  static const String ssCertPin = 'cert_pin_sha256';
 }

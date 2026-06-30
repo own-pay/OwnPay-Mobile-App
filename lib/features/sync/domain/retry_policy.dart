@@ -13,8 +13,6 @@ class RetryPolicy {
   final Duration baseDelay;
   final Duration maxDelay;
 
-  bool canRetry(int retryCount) => retryCount < maxRetries;
-
   Duration backoffFor(int retryCount) {
     if (retryCount <= 0) return baseDelay;
     final int factor = 1 << retryCount; // 2^retryCount; bounded since retryCount <= maxRetries
