@@ -95,15 +95,11 @@ class SettingsState extends Equatable {
 /// (best-effort) then clear ALL local data so nothing recoverable remains.
 class SettingsCubit extends Cubit<SettingsState> {
   SettingsCubit(this._store, this._devices, this._wipe, this._rules, this._overrides, {
-    FilterRulesHealthSource? rulesHealth,
-    SyncHealthSource? syncHealth,
-    SmsIngestCoordinator? ingest,
-    Syncer? sync,
-  })  : _rulesHealth = rulesHealth,
-        _syncHealth = syncHealth,
-        _ingest = ingest,
-        _sync = sync,
-        super(const SettingsState()) {
+    this._rulesHealth,
+    this._syncHealth,
+    this._ingest,
+    this._sync,
+  }) : super(const SettingsState()) {
     _rulesHealth?.health.addListener(_onRulesHealthChanged);
     _syncHealth?.health.addListener(_onSyncHealthChanged);
   }
