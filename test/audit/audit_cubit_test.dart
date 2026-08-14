@@ -36,7 +36,7 @@ void main() {
     final AuditCubit cubit = build();
     await cubit.load();
 
-    expect(cubit.state.visible, hasLength(3)); // All (default)
+    expect(cubit.state.visible, hasLength(4)); // All (default)
 
     cubit.setFilter(AuditFilter.synced);
     expect(cubit.state.visible, hasLength(1));
