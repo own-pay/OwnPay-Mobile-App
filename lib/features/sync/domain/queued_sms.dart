@@ -2,7 +2,7 @@ import 'package:equatable/equatable.dart';
 
 /// Lifecycle of a queued SMS as it syncs to the server. Serialized by name (not index), so the set
 /// can evolve without corrupting already-stored rows.
-enum SyncStatus { pending, approved, failed }
+enum SyncStatus { pending, approved, failed, receivedWithIssue }
 
 /// A gate-passed SMS awaiting (or having completed) sync. Holds only the **encrypted** payload —
 /// the plaintext body never reaches the queue.
@@ -29,7 +29,8 @@ class QueuedSms extends Equatable {
   final int retryCount;
   final String? serverRef;
 
-  /// Eligible for a sync attempt (pending or previously failed).
+  /// Eligible for a sync attempt (pending or previously failed). A row received by OwnPay with a
+  /// processing warning is deliberately not retried because the server has already persisted it.
   bool get isSyncable => status == SyncStatus.pending || status == SyncStatus.failed;
 
   QueuedSms copyWith({

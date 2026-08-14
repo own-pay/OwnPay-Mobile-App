@@ -31,6 +31,7 @@ void main() {
   test('visible filters by All / Synced / Issues', () async {
     queue.seed(status: SyncStatus.approved);
     queue.seed(status: SyncStatus.failed);
+    queue.seed(status: SyncStatus.receivedWithIssue);
     queue.seed(status: SyncStatus.pending);
     final AuditCubit cubit = build();
     await cubit.load();
@@ -45,20 +46,22 @@ void main() {
     expect(cubit.state.visible.single.isIssue, isTrue);
   });
 
-  test('failedCount counts only failed entries', () async {
+  test('failedCount counts retryable failures and received-with-issue entries', () async {
     queue.seed(status: SyncStatus.failed);
     queue.seed(status: SyncStatus.failed);
+    queue.seed(status: SyncStatus.receivedWithIssue);
     queue.seed(status: SyncStatus.approved);
     final AuditCubit cubit = build();
 
     await cubit.load();
 
-    expect(cubit.state.failedCount, 2);
+    expect(cubit.state.failedCount, 3);
   });
 
-  test('clearFailed removes only failed rows and reloads', () async {
+  test('clearFailed removes failed and received-with-issue rows and reloads', () async {
     queue.seed(status: SyncStatus.approved);
     queue.seed(status: SyncStatus.failed);
+    queue.seed(status: SyncStatus.receivedWithIssue);
     final AuditCubit cubit = build();
     await cubit.load();
 

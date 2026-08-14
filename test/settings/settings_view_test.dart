@@ -71,6 +71,8 @@ void main() {
     expect(find.text('uuid-1'), findsOneWidget);
     expect(find.text('Re-pair device'), findsOneWidget);
     expect(find.text('Revoke & wipe this device'), findsOneWidget);
+    expect(find.text('SMS DELIVERY'), findsOneWidget);
+    expect(find.textContaining('Checking SMS sources'), findsOneWidget);
   });
 
   testWidgets('revoke & wipe → confirm → wipes locally and navigates to /pair', (WidgetTester tester) async {

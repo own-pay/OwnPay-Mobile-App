@@ -7,6 +7,7 @@ import 'package:ownpay_console/core/storage/secure_store.dart';
 import 'package:ownpay_console/features/sync/data/sync_worker.dart';
 import 'package:ownpay_console/features/sync/domain/queued_sms.dart';
 import 'package:ownpay_console/features/sync/domain/sms_queue_store.dart';
+import 'package:ownpay_console/features/sync/domain/sync_health.dart';
 
 class _MockApiClient extends Mock implements ApiClient {}
 
@@ -70,16 +71,27 @@ class _FakeQueue implements SmsQueueStore {
   }
 
   @override
+  Future<void> markReceivedWithIssue(int localId, String? serverRef, String reason) async =>
+      _replace(_byId(localId).copyWith(
+        status: SyncStatus.receivedWithIssue,
+        serverRef: serverRef,
+        failureReason: reason,
+      ));
+
+  @override
   Future<int> purgeApproved(DateTime olderThan) async {
     final int before = rows.length;
-    rows.removeWhere((QueuedSms q) => q.status == SyncStatus.approved && q.createdAt.isBefore(olderThan));
+    rows.removeWhere((QueuedSms q) =>
+        (q.status == SyncStatus.approved || q.status == SyncStatus.receivedWithIssue) &&
+        q.createdAt.isBefore(olderThan));
     return before - rows.length;
   }
 
   @override
   Future<int> deleteFailed() async {
     final int before = rows.length;
-    rows.removeWhere((QueuedSms q) => q.status == SyncStatus.failed);
+    rows.removeWhere((QueuedSms q) =>
+        q.status == SyncStatus.failed || q.status == SyncStatus.receivedWithIssue);
     return before - rows.length;
   }
 
@@ -220,6 +232,69 @@ void main() {
     verify(() => api.post(any(), body: any(named: 'body'))).called(2); // drains across batches
   });
 
+  test('server rejection error codes are retained in the failed queue reason', () async {
+    final QueuedSms row = queue.seed();
+    stubPost(okResults(<Map<String, dynamic>>[
+      <String, dynamic>{
+        'local_id': row.localId,
+        'status': 'rejected',
+        'error': 'DEVICE_NOT_FOUND',
+      },
+    ]));
+
+    await SyncWorker(api, store, queue).syncNow();
+
+    expect((await queue.all()).single.failureReason, 'rejected: DEVICE_NOT_FOUND');
+  });
+
+  test('accepted processing errors become terminal review rows, not retries', () async {
+    final QueuedSms row = queue.seed();
+    stubPost(okResults(<Map<String, dynamic>>[
+      <String, dynamic>{
+        'local_id': row.localId,
+        'status': 'accepted',
+        'server_ref': 'sms_1',
+        'error': 'DECRYPTION_FAILED',
+      },
+    ]));
+    final SyncWorker worker = SyncWorker(api, store, queue);
+
+    await worker.syncNow();
+
+    final QueuedSms stored = (await queue.all()).single;
+    expect(stored.status, SyncStatus.receivedWithIssue);
+    expect(stored.retryCount, 0);
+    expect(stored.serverRef, 'sms_1');
+    expect(stored.failureReason, 'accepted: DECRYPTION_FAILED');
+    expect(worker.health.value.status, SyncHealthStatus.receivedWithIssue);
+    expect(worker.health.value.queuedCount, 0);
+    verify(() => api.post(any(), body: any(named: 'body'))).called(1);
+  });
+
+  test('successful delivery publishes a confirmed health snapshot', () async {
+    final QueuedSms row = queue.seed();
+    stubPost(okResults(<Map<String, dynamic>>[accepted(row.localId)]));
+    final SyncWorker worker = SyncWorker(api, store, queue);
+
+    await worker.syncNow();
+
+    expect(worker.health.value.status, SyncHealthStatus.synced);
+    expect(worker.health.value.message, 'SMS delivery confirmed by OwnPay.');
+  });
+
+  test('health counts include pending rows outside the failed batch', () async {
+    queue.seed();
+    queue.seed();
+    final SyncWorker worker = SyncWorker(api, store, queue, batchSize: 1);
+    stubPost(const Err<Map<String, dynamic>>(ServerFailure()));
+
+    await worker.syncNow();
+
+    expect(worker.health.value.status, SyncHealthStatus.failed);
+    expect(worker.health.value.queuedCount, 2);
+    expect(worker.health.value.failedCount, 1);
+  });
+
   test('after a retryable failure the worker backs off — an early retry is skipped, a later one runs', () async {
     queue.seed();
     DateTime now = DateTime(2026, 6, 28, 12, 0, 0);
@@ -229,6 +304,9 @@ void main() {
     stubPost(const Err<Map<String, dynamic>>(ServerFailure()));
     await worker.syncNow();
     expect((await queue.all()).single.retryCount, 1);
+    expect(worker.health.value.status, SyncHealthStatus.failed);
+    expect(worker.health.value.queuedCount, 1);
+    expect(worker.health.value.failedCount, 1);
     verify(() => api.post(any(), body: any(named: 'body'))).called(1);
     clearInteractions(api);
 

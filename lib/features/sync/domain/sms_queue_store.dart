@@ -26,10 +26,16 @@ abstract interface class SmsQueueStore {
   /// Records a failed sync attempt: `status = failed`, `retryCount++`, and the non-sensitive [reason].
   Future<void> markFailed(int localId, String reason);
 
-  /// Deletes `approved` rows created before [olderThan] (retention cleanup). Returns the count removed.
+  /// Records that OwnPay received and persisted the SMS but reported a processing warning. This is
+  /// terminal for mobile delivery: it must not be retried or counted as a transport failure.
+  Future<void> markReceivedWithIssue(int localId, String? serverRef, String reason);
+
+  /// Deletes `approved` and `receivedWithIssue` rows created before [olderThan] (retention cleanup).
+  /// Returns the count removed.
   Future<int> purgeApproved(DateTime olderThan);
 
-  /// Deletes every row currently in the `failed` state (the user's "clear failed" action). Returns count.
+  /// Deletes every row currently in the `failed` or `receivedWithIssue` state (the user's "clear issues"
+  /// action). Returns count.
   Future<int> deleteFailed();
 
   /// Resets every `failed` row back to `pending` with `retryCount = 0` (and clears its failure reason),

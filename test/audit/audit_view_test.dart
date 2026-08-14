@@ -15,6 +15,12 @@ void main() {
     final FakeSmsQueueStore queue = FakeSmsQueueStore();
     queue.seed(sender: 'bKash', status: SyncStatus.approved, payload: 'SECRET_ENVELOPE');
     queue.seed(sender: 'Nagad', status: SyncStatus.failed, failureReason: 'timeout');
+    queue.seed(
+      sender: 'Rocket',
+      status: SyncStatus.receivedWithIssue,
+      failureReason: 'DECRYPTION_FAILED',
+      serverRef: 'sms_1',
+    );
     final AuditCubit cubit = AuditCubit(queue, FakeSyncer(), FakeSmsBodyRevealer());
     await cubit.load();
 
@@ -24,15 +30,17 @@ void main() {
     expect(find.text('Nagad'), findsOneWidget);
     expect(find.text('Confirmed'), findsOneWidget);
     expect(find.text('Failed'), findsOneWidget);
+    expect(find.text('Received; review'), findsOneWidget);
     expect(find.textContaining('timeout'), findsOneWidget);
     // The ciphertext envelope must never reach the UI.
     expect(find.textContaining('SECRET_ENVELOPE'), findsNothing);
   });
 
-  testWidgets('Issues filter hides non-failed rows', (WidgetTester tester) async {
+  testWidgets('Issues filter hides non-issue rows', (WidgetTester tester) async {
     final FakeSmsQueueStore queue = FakeSmsQueueStore();
     queue.seed(sender: 'bKash', status: SyncStatus.approved);
     queue.seed(sender: 'Nagad', status: SyncStatus.failed, failureReason: 'timeout');
+    queue.seed(sender: 'Rocket', status: SyncStatus.receivedWithIssue, failureReason: 'review');
     final AuditCubit cubit = AuditCubit(queue, FakeSyncer(), FakeSmsBodyRevealer());
     await cubit.load();
     await tester.pumpWidget(_host(cubit));
@@ -41,6 +49,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Nagad'), findsOneWidget);
+    expect(find.text('Rocket'), findsOneWidget);
     expect(find.text('bKash'), findsNothing);
   });
 
@@ -53,14 +62,15 @@ void main() {
     expect(find.textContaining('No activity yet'), findsOneWidget);
   });
 
-  testWidgets('Clear failed removes failed rows after confirmation', (WidgetTester tester) async {
+  testWidgets('Clear issues removes failed and review rows after confirmation', (WidgetTester tester) async {
     final FakeSmsQueueStore queue = FakeSmsQueueStore();
     queue.seed(sender: 'Nagad', status: SyncStatus.failed, failureReason: 'timeout');
+    queue.seed(sender: 'Rocket', status: SyncStatus.receivedWithIssue, failureReason: 'review');
     final AuditCubit cubit = AuditCubit(queue, FakeSyncer(), FakeSmsBodyRevealer());
     await cubit.load();
     await tester.pumpWidget(_host(cubit));
 
-    await tester.tap(find.text('Clear failed'));
+    await tester.tap(find.text('Clear issues'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Clear')); // confirm in the dialog
     await tester.pumpAndSettle();

@@ -33,6 +33,7 @@ import '../features/permissions/domain/sms_permission.dart';
 import '../features/privacy_gate/data/filter_rules_cache.dart';
 import '../features/privacy_gate/data/network_filter_rules_repository.dart';
 import '../features/privacy_gate/data/sender_overrides.dart';
+import '../features/privacy_gate/domain/filter_rules_health.dart';
 import '../features/privacy_gate/domain/filter_rules_repository.dart';
 import '../features/privacy_gate/domain/privacy_gate.dart';
 import '../features/sms_capture/data/platform_sms_capture.dart';
@@ -41,6 +42,7 @@ import '../features/sms_capture/domain/sms_capture.dart';
 import '../features/sync/data/hive_sms_queue_store.dart';
 import '../features/sync/data/sync_worker.dart';
 import '../features/sync/domain/sms_queue_store.dart';
+import '../features/sync/domain/sync_health.dart';
 import '../features/sync/domain/syncer.dart';
 
 /// Service locator. Registration is manual (no codegen) and ordered so the AuthInterceptor can be
@@ -78,13 +80,15 @@ Future<void> configureDependencies() async {
     ..registerLazySingleton<PrivacyGate>(() => const PrivacyGate())
     ..registerLazySingleton<FilterRulesCache>(HiveFilterRulesCache.new)
     ..registerLazySingleton<SenderOverrides>(HiveSenderOverrides.new)
-    ..registerLazySingleton<FilterRulesRepository>(
+    ..registerLazySingleton<NetworkFilterRulesRepository>(
       () => NetworkFilterRulesRepository(
         sl<ApiClient>(),
         sl<SecureStore>(),
         sl<FilterRulesCache>(),
       ),
     )
+    ..registerLazySingleton<FilterRulesRepository>(() => sl<NetworkFilterRulesRepository>())
+    ..registerLazySingleton<FilterRulesHealthSource>(() => sl<NetworkFilterRulesRepository>())
     ..registerLazySingleton<SmsQueueStore>(HiveSmsQueueStore.new)
     ..registerLazySingleton<SmsBodyRevealer>(
       () => SmsBodyRevealer(sl<SmsQueueStore>(), sl<SecureStore>(), sl<AesGcmCipher>()),
@@ -109,6 +113,7 @@ Future<void> configureDependencies() async {
       ),
     )
     ..registerLazySingleton<Syncer>(() => sl<SyncWorker>()) // same instance, exposed to presentation
+    ..registerLazySingleton<SyncHealthSource>(() => sl<SyncWorker>())
     ..registerLazySingleton<DashboardCache>(HiveDashboardCache.new)
     ..registerLazySingleton<DashboardRepository>(
       () => NetworkDashboardRepository(sl<ApiClient>(), sl<SecureStore>(), sl<DashboardCache>()),
