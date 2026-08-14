@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../../../core/config/app_config.dart';
 import '../../../core/error/failure.dart';
 import '../../../core/network/api_client.dart';
@@ -6,10 +8,12 @@ import '../../../core/storage/secure_store.dart';
 
 /// Device pairing + token refresh against the bootstrap endpoints (`auth: false`).
 class DeviceRepository {
-  DeviceRepository(this._api, this._store);
+  DeviceRepository(this._api, this._store, {bool Function()? isReleaseMode})
+      : _isReleaseMode = isReleaseMode ?? (() => kReleaseMode);
 
   final ApiClient _api;
   final SecureStore _store;
+  final bool Function() _isReleaseMode;
 
   /// Pairs with the scanned/entered server using the one-time OTP. On success, persists the issued
   /// credentials (tokens, AES key, server URL, device uuid) to secure storage.
@@ -21,6 +25,9 @@ class DeviceRepository {
     final String base = _normalizeBase(serverUrl);
     if (base.isEmpty) {
       return const Err<void>(ValidationFailure(message: 'Enter a valid server URL.'));
+    }
+    if (_isReleaseMode() && !base.startsWith('https://')) {
+      return const Err<void>(ValidationFailure(message: 'Production pairing requires an HTTPS server URL.'));
     }
 
     final String deviceId = await _store.getOrCreateDeviceId();

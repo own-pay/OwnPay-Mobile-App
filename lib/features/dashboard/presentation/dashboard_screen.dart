@@ -7,6 +7,8 @@ import '../../../app/di.dart';
 import '../../../core/services/app_refresh_signal.dart';
 import '../../../core/storage/secure_store.dart';
 import '../../../shared/theme/app_theme.dart';
+import '../../privacy_gate/domain/filter_rules_health.dart';
+import '../../sync/domain/sync_health.dart';
 import '../domain/dashboard_repository.dart';
 import '../domain/dashboard_snapshot.dart';
 import 'dashboard_cubit.dart';
@@ -20,7 +22,11 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider<DashboardCubit>(
       create: (_) => DashboardCubit(sl<DashboardRepository>(), sl<SecureStore>())..load(),
-      child: DashboardView(refresh: sl<AppRefreshSignal>()),
+      child: DashboardView(
+        refresh: sl<AppRefreshSignal>(),
+        rulesHealth: sl<FilterRulesHealthSource>(),
+        syncHealth: sl<SyncHealthSource>(),
+      ),
     );
   }
 }
@@ -28,9 +34,11 @@ class DashboardScreen extends StatelessWidget {
 /// Split from [DashboardScreen] so widget tests can pump it with an injected cubit. Reloads whenever the
 /// bottom-nav Refresh action fires ([refresh] is supplied by the screen; null in tests → no subscription).
 class DashboardView extends StatefulWidget {
-  const DashboardView({this.refresh, super.key});
+  const DashboardView({this.refresh, this.rulesHealth, this.syncHealth, super.key});
 
   final AppRefreshSignal? refresh;
+  final FilterRulesHealthSource? rulesHealth;
+  final SyncHealthSource? syncHealth;
 
   @override
   State<DashboardView> createState() => _DashboardViewState();
@@ -85,7 +93,7 @@ class _DashboardViewState extends State<DashboardView> {
         children: <Widget>[
           _HostCard(host: state.serverHost, online: !state.offline),
           const SizedBox(height: 12),
-          const _MonitoringCard(),
+          _MonitoringCard(rulesHealth: widget.rulesHealth, syncHealth: widget.syncHealth),
           if (state.offline) ...<Widget>[
             const SizedBox(height: 12),
             _OfflineBanner(asOf: snapshot.fetchedAt),
@@ -177,32 +185,100 @@ class _HostCard extends StatelessWidget {
   }
 }
 
-/// Operational-status block: capture + sync are running.
-class _MonitoringCard extends StatelessWidget {
-  const _MonitoringCard();
+/// Operational-status block: reflects the actual mobile-to-web delivery state rather than assuming
+/// that a paired device is forwarding SMS.
+class _MonitoringCard extends StatefulWidget {
+  const _MonitoringCard({this.rulesHealth, this.syncHealth});
+
+  final FilterRulesHealthSource? rulesHealth;
+  final SyncHealthSource? syncHealth;
+
+  @override
+  State<_MonitoringCard> createState() => _MonitoringCardState();
+}
+
+class _MonitoringCardState extends State<_MonitoringCard> {
+  @override
+  void initState() {
+    super.initState();
+    widget.rulesHealth?.health.addListener(_changed);
+    widget.syncHealth?.health.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    widget.rulesHealth?.health.removeListener(_changed);
+    widget.syncHealth?.health.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
-    return const _Card(
+    final FilterRulesHealthSnapshot rules =
+        widget.rulesHealth?.health.value ?? const FilterRulesHealthSnapshot();
+    final SyncHealthSnapshot sync = widget.syncHealth?.health.value ?? const SyncHealthSnapshot();
+    final bool rulesChecking = rules.status == FilterRulesHealthStatus.unknown;
+    final bool blocked = !rulesChecking && rules.status != FilterRulesHealthStatus.ready;
+    final bool problem = rulesChecking || blocked ||
+        sync.status == SyncHealthStatus.failed ||
+        sync.status == SyncHealthStatus.receivedWithIssue ||
+        sync.status == SyncHealthStatus.authRequired ||
+        sync.status == SyncHealthStatus.blocked;
+    final String title = rulesChecking
+        ? 'Checking SMS sources'
+        : blocked
+            ? 'SMS forwarding paused'
+            : switch (sync.status) {
+            SyncHealthStatus.syncing => 'Sending SMS data',
+            SyncHealthStatus.synced => 'SMS delivery confirmed',
+            SyncHealthStatus.receivedWithIssue => 'SMS received; review needed',
+            SyncHealthStatus.failed => 'SMS delivery needs attention',
+            SyncHealthStatus.authRequired => 'Device needs re-pairing',
+            SyncHealthStatus.blocked => 'SMS forwarding paused',
+            SyncHealthStatus.idle => 'SMS forwarding ready',
+            SyncHealthStatus.unknown => 'Checking SMS delivery',
+          };
+    final String detail = rulesChecking || blocked ? rules.message : sync.message;
+    final Color color = problem ? AppColors.warning : AppColors.success;
+    final String pill = rulesChecking
+        ? 'Checking'
+        : blocked
+            ? 'Paused'
+            : switch (sync.status) {
+            SyncHealthStatus.syncing => 'Sending',
+            SyncHealthStatus.synced => 'Confirmed',
+            SyncHealthStatus.receivedWithIssue => 'Review',
+            SyncHealthStatus.failed => 'Issue',
+            SyncHealthStatus.authRequired => 'Re-pair',
+            SyncHealthStatus.blocked => 'Paused',
+            SyncHealthStatus.idle => 'Ready',
+            SyncHealthStatus.unknown => 'Checking',
+          };
+
+    return _Card(
       child: Row(
         children: <Widget>[
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
+                Text(title, style: const TextStyle(color: AppColors.textHi, fontSize: 15, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
                 Text(
-                  'Monitoring Active',
-                  style: TextStyle(color: AppColors.textHi, fontSize: 15, fontWeight: FontWeight.w700),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Monitoring mobile gateway rules',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                  detail,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                 ),
               ],
             ),
           ),
-          _Pill(label: 'Sync Enabled', color: AppColors.brand, outlined: true),
+          const SizedBox(width: 8),
+          _Pill(label: pill, color: color, outlined: true),
         ],
       ),
     );

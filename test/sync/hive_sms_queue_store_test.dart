@@ -93,6 +93,20 @@ void main() {
     expect(row.retryCount, 2);
   });
 
+  test('markReceivedWithIssue persists a terminal warning without incrementing retry', () async {
+    final HiveSmsQueueStore store = HiveSmsQueueStore();
+    final QueuedSms a = await enqueue(store);
+
+    await store.markReceivedWithIssue(a.localId, 'sms_ref_1', 'accepted: DECRYPTION_FAILED');
+
+    final QueuedSms row = (await store.all()).single;
+    expect(row.status, SyncStatus.receivedWithIssue);
+    expect(row.serverRef, 'sms_ref_1');
+    expect(row.failureReason, 'accepted: DECRYPTION_FAILED');
+    expect(row.retryCount, 0);
+    expect(await store.syncable(maxRetries: 5, limit: 50), isEmpty);
+  });
+
   test('a row that exhausted maxRetries is no longer syncable', () async {
     final HiveSmsQueueStore store = HiveSmsQueueStore();
     final QueuedSms a = await enqueue(store);
@@ -103,35 +117,39 @@ void main() {
     expect(await store.syncable(maxRetries: 5, limit: 50), isEmpty);
   });
 
-  test('purgeApproved deletes only approved rows older than the cutoff', () async {
+  test('purgeApproved deletes terminal rows older than the cutoff', () async {
     DateTime clock = DateTime(2026, 6, 1);
     final HiveSmsQueueStore store = HiveSmsQueueStore(() => clock);
 
     final QueuedSms old = await enqueue(store); // createdAt 2026-06-01
+    final QueuedSms oldReview = await enqueue(store); // createdAt 2026-06-01
     clock = DateTime(2026, 6, 10);
     final QueuedSms recent = await enqueue(store); // createdAt 2026-06-10
     final QueuedSms pending = await enqueue(store); // createdAt 2026-06-10, stays pending
     await store.markApproved(old.localId, null);
+    await store.markReceivedWithIssue(oldReview.localId, 'ref', 'review');
     await store.markApproved(recent.localId, null);
 
     final int removed = await store.purgeApproved(DateTime(2026, 6, 5));
 
-    expect(removed, 1); // only the old approved row
+    expect(removed, 2); // old approved + old received-with-issue row
     final List<int> remaining = (await store.all()).map((QueuedSms q) => q.localId).toList()..sort();
     expect(remaining, <int>[recent.localId, pending.localId]);
   });
 
-  test('deleteFailed removes only failed rows', () async {
+  test('deleteFailed removes failed and received-with-issue rows', () async {
     final HiveSmsQueueStore store = HiveSmsQueueStore();
     final QueuedSms a = await enqueue(store);
     final QueuedSms b = await enqueue(store);
+    final QueuedSms c = await enqueue(store);
     await store.markFailed(a.localId, 'timeout');
-    await store.markApproved(b.localId, 'ref');
+    await store.markReceivedWithIssue(b.localId, 'ref', 'review');
+    await store.markApproved(c.localId, 'ref-2');
 
     final int removed = await store.deleteFailed();
 
-    expect(removed, 1);
-    expect((await store.all()).map((QueuedSms q) => q.localId), <int>[b.localId]);
+    expect(removed, 2);
+    expect((await store.all()).map((QueuedSms q) => q.localId), <int>[c.localId]);
   });
 
   test('resetFailedForRetry revives failed rows to pending (retry 0); leaves others untouched', () async {

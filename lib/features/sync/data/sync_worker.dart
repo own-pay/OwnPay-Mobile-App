@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/error/failure.dart';
@@ -10,14 +11,16 @@ import '../../../core/storage/secure_store.dart';
 import '../domain/queued_sms.dart';
 import '../domain/retry_policy.dart';
 import '../domain/sms_queue_store.dart';
+import '../domain/sync_health.dart';
 import '../domain/syncer.dart';
 
 /// Drains the encrypted offline queue to `POST /api/mobile/v1/sms` and reflects the server's verdict
 /// back onto each row. Only the AES-GCM envelope leaves the device (never plaintext — [QueuedSms.toApi]).
 ///
 /// One attempt = batches of [batchSize] `syncable` rows, posted oldest-first. Per the result:
-///   - `accepted` / `duplicate` → `markApproved` (+ server ref) — a `duplicate` is a server-side
-///                                success (the message is already stored), so it must not be re-posted
+///   - `accepted` / `duplicate` without an error → `markApproved` (+ server ref) — a `duplicate` is a
+///                                server-side success (the message is already stored), so it must not be re-posted
+///   - `accepted` with an error → `markReceivedWithIssue` (terminal review row; never retried)
 ///   - any other / missing      → `markFailed` (retryCount++ — surfaces in the audit UI, retried later)
 ///
 /// Draining keeps going only while a whole batch is accepted; the run stops on the first failure and
@@ -26,7 +29,7 @@ import '../domain/syncer.dart';
 /// (a 401 the interceptor could not refresh) fires [onReauthRequired] and stops **without** bumping
 /// retry or backing off — the rows are fine, authorization is not; they sync once the device re-pairs.
 /// Calls are serialized.
-class SyncWorker implements Syncer {
+class SyncWorker implements Syncer, SyncHealthSource {
   SyncWorker(
     this._api,
     this._store,
@@ -46,6 +49,11 @@ class SyncWorker implements Syncer {
 
   /// Injectable clock (defaults to [DateTime.now]) — overridden in tests to exercise backoff timing.
   final DateTime Function() now;
+  final ValueNotifier<SyncHealthSnapshot> _health =
+      ValueNotifier<SyncHealthSnapshot>(const SyncHealthSnapshot());
+
+  @override
+  ValueListenable<SyncHealthSnapshot> get health => _health;
 
   bool _syncing = false;
   bool _rerun = false;
@@ -68,6 +76,7 @@ class SyncWorker implements Syncer {
   Future<void> dispose() async {
     await _connSub?.cancel();
     _connSub = null;
+    _health.dispose();
   }
 
   /// Attempts to sync the queue now. Safe to call concurrently — an in-flight run absorbs the request
@@ -95,6 +104,10 @@ class SyncWorker implements Syncer {
   Future<void> _syncOnce() async {
     final String? base = await _store.readServerUrl();
     if (base == null || base.isEmpty) {
+      _setHealth(
+        SyncHealthStatus.blocked,
+        'No paired server URL. Pair this device before sending SMS.',
+      );
       return; // not paired — nothing to sync to
     }
 
@@ -108,10 +121,38 @@ class SyncWorker implements Syncer {
     while (true) {
       final List<QueuedSms> batch =
           await _queue.syncable(maxRetries: policy.maxRetries, limit: batchSize);
+      final _QueueCounts counts = await _queueCounts();
       if (batch.isEmpty) {
         _retryNotBefore = null; // queue drained (or all exhausted) — clear any pending backoff
+        final bool justSucceeded = _health.value.status == SyncHealthStatus.synced;
+        final bool hasReceivedWithIssue = counts.receivedWithIssueCount > 0;
+        _setHealth(
+          counts.failedCount > 0
+              ? SyncHealthStatus.failed
+              : hasReceivedWithIssue
+                  ? SyncHealthStatus.receivedWithIssue
+                  : justSucceeded
+                      ? SyncHealthStatus.synced
+                      : SyncHealthStatus.idle,
+          counts.failedCount > 0
+              ? '${counts.failedCount} SMS item(s) need attention.'
+              : hasReceivedWithIssue
+                  ? 'OwnPay has ${counts.receivedWithIssueCount} SMS item(s) needing review.'
+                  : justSucceeded
+                      ? 'SMS delivery confirmed by OwnPay.'
+                      : 'SMS delivery is ready; no messages are queued.',
+          queuedCount: counts.queuedCount,
+          failedCount: counts.failedCount,
+        );
         return;
       }
+
+      _setHealth(
+        SyncHealthStatus.syncing,
+        'Sending ${batch.length} queued SMS item(s)…',
+        queuedCount: counts.queuedCount,
+        failedCount: counts.failedCount,
+      );
 
       final ApiResult<Map<String, dynamic>> res = await _api.post(
         '$base${AppConfig.apiPrefix}/sms',
@@ -132,6 +173,13 @@ class SyncWorker implements Syncer {
     switch (res) {
       case Err<Map<String, dynamic>>(:final Failure failure):
         if (failure is AuthFailure) {
+          final _QueueCounts counts = await _queueCounts();
+          _setHealth(
+            SyncHealthStatus.authRequired,
+            'Device authorization expired. Re-pair this device.',
+            queuedCount: counts.queuedCount,
+            failedCount: counts.failedCount,
+          );
           onReauthRequired?.call();
           return false; // re-pair needed; leave rows untouched (no retry bump)
         }
@@ -140,6 +188,13 @@ class SyncWorker implements Syncer {
           await _queue.markFailed(row.localId, failure.message);
         }
         _backOff(batch);
+        final _QueueCounts counts = await _queueCounts();
+        _setHealth(
+          SyncHealthStatus.failed,
+          failure.message,
+          queuedCount: counts.queuedCount,
+          failedCount: counts.failedCount,
+        );
         return false;
       case Ok<Map<String, dynamic>>(:final Map<String, dynamic> value):
         final Map<int, _SmsResult> results = _parseResults(value);
@@ -148,15 +203,59 @@ class SyncWorker implements Syncer {
         for (final QueuedSms row in batch) {
           final _SmsResult? result = results[row.localId];
           if (result != null && result.accepted) {
-            await _queue.markApproved(row.localId, result.serverRef);
+            final String? error = result.error;
+            if (error != null && error.isNotEmpty) {
+              await _queue.markReceivedWithIssue(
+                row.localId,
+                result.serverRef,
+                '${result.status}: $error',
+              );
+            } else {
+              await _queue.markApproved(row.localId, result.serverRef);
+            }
           } else {
             allAccepted = false;
             failed.add(row);
-            await _queue.markFailed(row.localId, result?.status ?? 'no server result');
+            final String reason = result == null
+                ? 'No server result for this SMS item.'
+                : [
+                    result.status,
+                    if (result.error != null && result.error!.isNotEmpty) result.error!,
+                  ].join(': ');
+            await _queue.markFailed(row.localId, reason);
           }
         }
+        final _QueueCounts counts = await _queueCounts();
         if (!allAccepted) {
           _backOff(failed);
+          _setHealth(
+            SyncHealthStatus.failed,
+            'The server rejected ${failed.length} SMS item(s).',
+            queuedCount: counts.queuedCount,
+            failedCount: counts.failedCount,
+          );
+        } else if (counts.failedCount > 0) {
+          _setHealth(
+            SyncHealthStatus.failed,
+            '${counts.failedCount} SMS item(s) need attention.',
+            queuedCount: counts.queuedCount,
+            failedCount: counts.failedCount,
+          );
+        } else if (counts.receivedWithIssueCount > 0) {
+          _setHealth(
+            SyncHealthStatus.receivedWithIssue,
+            'OwnPay has ${counts.receivedWithIssueCount} SMS item(s) needing review.',
+            queuedCount: counts.queuedCount,
+            failedCount: counts.failedCount,
+          );
+        } else {
+          _setHealth(
+            SyncHealthStatus.synced,
+            'SMS delivery confirmed by OwnPay.',
+            queuedCount: counts.queuedCount,
+            failedCount: counts.failedCount,
+            lastSuccessAt: now(),
+          );
         }
         return allAccepted;
     }
@@ -175,6 +274,34 @@ class SyncWorker implements Syncer {
     _retryNotBefore = now().add(policy.backoffFor(minRetry + 1));
   }
 
+  Future<_QueueCounts> _queueCounts() async {
+    final List<QueuedSms> rows = await _queue.all();
+    return _QueueCounts(
+      queuedCount: rows.where((QueuedSms row) => row.isSyncable).length,
+      failedCount: rows.where((QueuedSms row) => row.status == SyncStatus.failed).length,
+      receivedWithIssueCount:
+          rows.where((QueuedSms row) => row.status == SyncStatus.receivedWithIssue).length,
+    );
+  }
+
+  void _setHealth(
+    SyncHealthStatus status,
+    String message, {
+    int? queuedCount,
+    int? failedCount,
+    DateTime? lastSuccessAt,
+  }) {
+    final SyncHealthSnapshot previous = _health.value;
+    _health.value = SyncHealthSnapshot(
+      status: status,
+      message: message,
+      queuedCount: queuedCount ?? previous.queuedCount,
+      failedCount: failedCount ?? previous.failedCount,
+      lastAttemptAt: now(),
+      lastSuccessAt: lastSuccessAt ?? previous.lastSuccessAt,
+    );
+  }
+
   /// Indexes the response `results` array by `local_id`.
   Map<int, _SmsResult> _parseResults(Map<String, dynamic> body) {
     final Object? results = body['results'];
@@ -186,9 +313,11 @@ class SyncWorker implements Syncer {
           final int? localId = rawId is int ? rawId : int.tryParse('$rawId');
           if (localId != null) {
             final Object? status = item['status'];
+            final Object? error = item['error'];
             final Object? ref = item['server_ref'];
             out[localId] = _SmsResult(
               status: status is String ? status : '',
+              error: error is String ? error : null,
               serverRef: ref is String ? ref : null,
             );
           }
@@ -199,11 +328,24 @@ class SyncWorker implements Syncer {
   }
 }
 
+class _QueueCounts {
+  const _QueueCounts({
+    required this.queuedCount,
+    required this.failedCount,
+    required this.receivedWithIssueCount,
+  });
+
+  final int queuedCount;
+  final int failedCount;
+  final int receivedWithIssueCount;
+}
+
 /// One server verdict for a queued message.
 class _SmsResult {
-  const _SmsResult({required this.status, required this.serverRef});
+  const _SmsResult({required this.status, required this.error, required this.serverRef});
 
   final String status;
+  final String? error;
   final String? serverRef;
 
   /// The server treats a `duplicate` as a success — the message is already stored (its dedupe is on

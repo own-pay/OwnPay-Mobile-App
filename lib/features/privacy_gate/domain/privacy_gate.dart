@@ -26,11 +26,11 @@ class PrivacyGate {
     final String sender = sms.sender.trim().toLowerCase();
     final String body = sms.body.toLowerCase();
 
-    // 2. Sender whitelist — equality or substring (supports shortcodes like "16247" and alpha
-    //    ids like "bKash").
+    // 2. Sender whitelist — exact normalized match. The web parser uses the same contract, which
+    // prevents the device from uploading a sender variant the server cannot parse with its template.
     final bool senderAllowed = rules.allowedSenders.any((String p) {
       final String pat = p.trim().toLowerCase();
-      return pat.isNotEmpty && (sender == pat || sender.contains(pat));
+      return pat.isNotEmpty && sender == pat;
     });
     if (!senderAllowed) {
       return GateDecision.senderNotAllowed;
