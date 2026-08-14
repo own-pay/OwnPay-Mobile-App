@@ -43,7 +43,8 @@ void main() {
     expect(cubit.state.visible.single.isSynced, isTrue);
 
     cubit.setFilter(AuditFilter.issues);
-    expect(cubit.state.visible.single.isIssue, isTrue);
+    expect(cubit.state.visible, hasLength(2));
+    expect(cubit.state.visible.every((AuditEntry e) => e.isIssue), isTrue);
   });
 
   test('failedCount counts retryable failures and received-with-issue entries', () async {
