@@ -56,8 +56,11 @@ void main() {
       expect(gate.evaluate(sms('BKASH', 'credited Tk 500 TrxID 9A'), rules()).passed, isTrue);
     });
 
-    test('substring sender id matches (alpha sender variants)', () {
-      expect(gate.evaluate(sms('bKash-Alert', 'credited Tk 500 TrxID 9A'), rules()).passed, isTrue);
+    test('sender variants are rejected when the web template does not match them', () {
+      expect(
+        gate.evaluate(sms('bKash-Alert', 'credited Tk 500 TrxID 9A'), rules()).outcome,
+        GateOutcome.droppedSenderNotAllowed,
+      );
     });
   });
 

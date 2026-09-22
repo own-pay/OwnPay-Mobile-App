@@ -69,14 +69,18 @@ void main() {
 
     expect(find.text('https://srv.example'), findsOneWidget);
     expect(find.text('uuid-1'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Re-pair device'), 300);
     expect(find.text('Re-pair device'), findsOneWidget);
     expect(find.text('Revoke & wipe this device'), findsOneWidget);
+    expect(find.text('SMS DELIVERY'), findsOneWidget);
+    expect(find.textContaining('Checking SMS sources'), findsOneWidget);
   });
 
   testWidgets('revoke & wipe → confirm → wipes locally and navigates to /pair', (WidgetTester tester) async {
     await tester.pumpWidget(_host(cubit()));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(find.text('Revoke & wipe this device'), 300);
     await tester.tap(find.text('Revoke & wipe this device'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Erase')); // confirm in the dialog

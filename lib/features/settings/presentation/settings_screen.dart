@@ -8,8 +8,12 @@ import '../../../core/storage/local_wipe.dart';
 import '../../../core/storage/secure_store.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../pairing/data/device_repository.dart';
+import '../../sms_capture/data/sms_ingest_coordinator.dart';
 import '../../privacy_gate/data/sender_overrides.dart';
+import '../../privacy_gate/domain/filter_rules_health.dart';
 import '../../privacy_gate/domain/filter_rules_repository.dart';
+import '../../sync/domain/sync_health.dart';
+import '../../sync/domain/syncer.dart';
 import 'settings_cubit.dart';
 
 /// Device settings: connection info, the SMS-source whitelist (toggle each source on/off on this device,
@@ -26,6 +30,10 @@ class SettingsScreen extends StatelessWidget {
         sl<LocalWipe>(),
         sl<FilterRulesRepository>(),
         sl<SenderOverrides>(),
+        rulesHealth: sl<FilterRulesHealthSource>(),
+        syncHealth: sl<SyncHealthSource>(),
+        ingest: sl<SmsIngestCoordinator>(),
+        sync: sl<Syncer>(),
       )..load(),
       child: const SettingsView(),
     );
@@ -62,6 +70,8 @@ class SettingsView extends StatelessWidget {
                     const _InfoTile(label: 'App version', value: AppConfig.appVersion),
                   ],
                 ),
+                const SizedBox(height: 24),
+                _DeliveryHealthSection(state: state),
                 const SizedBox(height: 24),
                 _SmsSourcesSection(state: state, cubit: cubit),
                 const SizedBox(height: 24),
@@ -122,6 +132,67 @@ class SettingsView extends StatelessWidget {
       await cubit.revokeAndWipe();
     }
   }
+}
+
+class _DeliveryHealthSection extends StatelessWidget {
+  const _DeliveryHealthSection({required this.state});
+
+  final SettingsState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final FilterRulesHealthSnapshot rules = state.rulesHealth;
+    final SyncHealthSnapshot sync = state.syncHealth;
+    final bool blocked = rules.status != FilterRulesHealthStatus.ready;
+    final bool hasIssues = sync.status == SyncHealthStatus.failed ||
+        sync.status == SyncHealthStatus.receivedWithIssue ||
+        sync.status == SyncHealthStatus.authRequired ||
+        sync.status == SyncHealthStatus.blocked;
+    final Color color = blocked || hasIssues ? AppColors.warning : AppColors.success;
+    final IconData icon = blocked || hasIssues ? Icons.warning_amber_rounded : Icons.check_circle_outline;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('SMS DELIVERY', style: AppTheme.overline.copyWith(color: AppColors.textMuted)),
+        const SizedBox(height: 10),
+        _InfoCard(
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(icon, color: color, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    blocked ? rules.message : sync.message,
+                    style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 18),
+            _InfoTile(label: 'Sources', value: rules.status == FilterRulesHealthStatus.ready
+                ? '${state.senders.length} available'
+                : rules.status.name),
+            _InfoTile(label: 'Queue', value: '${sync.queuedCount} waiting · ${sync.failedCount} failed'),
+            if (sync.lastSuccessAt != null)
+              _InfoTile(label: 'Last sent', value: _formatDate(sync.lastSuccessAt!)),
+          ],
+        ),
+        if (blocked)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              'SMS forwarding stays paused until the server provides an allowed source. Use “Sync from admin” below after checking the SMS templates.',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _formatDate(DateTime value) => '${value.year}-${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
 }
 
 /// The SMS-source whitelist: each server-whitelisted sender with an on/off switch (off = disabled on

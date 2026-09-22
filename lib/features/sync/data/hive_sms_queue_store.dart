@@ -95,12 +95,24 @@ class HiveSmsQueueStore implements SmsQueueStore {
   }
 
   @override
+  Future<void> markReceivedWithIssue(int localId, String? serverRef, String reason) async {
+    await _update(localId, (QueuedSms row) => row.copyWith(
+          status: SyncStatus.receivedWithIssue,
+          serverRef: serverRef,
+          failureReason: reason,
+        ));
+  }
+
+  @override
   Future<int> purgeApproved(DateTime olderThan) async {
     final Box<Object> box = await _openBox();
     final List<int> stale = <int>[];
     for (final Object? key in box.keys) {
       final QueuedSms? row = _decode(box.get(key));
-      if (key is int && row != null && row.status == SyncStatus.approved && row.createdAt.isBefore(olderThan)) {
+      if (key is int &&
+          row != null &&
+          (row.status == SyncStatus.approved || row.status == SyncStatus.receivedWithIssue) &&
+          row.createdAt.isBefore(olderThan)) {
         stale.add(key);
       }
     }
@@ -114,7 +126,9 @@ class HiveSmsQueueStore implements SmsQueueStore {
     final List<int> failed = <int>[];
     for (final Object? key in box.keys) {
       final QueuedSms? row = _decode(box.get(key));
-      if (key is int && row != null && row.status == SyncStatus.failed) {
+      if (key is int &&
+          row != null &&
+          (row.status == SyncStatus.failed || row.status == SyncStatus.receivedWithIssue)) {
         failed.add(key);
       }
     }

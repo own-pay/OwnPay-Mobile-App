@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:ownpay_console/core/error/failure.dart';
 import 'package:ownpay_console/core/network/api_client.dart';
 import 'package:ownpay_console/core/network/api_result.dart';
 import 'package:ownpay_console/features/pairing/data/device_repository.dart';
@@ -64,6 +65,21 @@ void main() {
             serverUrl: 'https://srv.example',
             deviceUuid: 'UUID',
           )).called(1);
+    });
+
+    test('release pairing rejects HTTP before making a network request', () async {
+      final DeviceRepository releaseRepo = DeviceRepository(
+        ApiClient(dio),
+        store,
+        isReleaseMode: () => true,
+      );
+
+      final ApiResult<void> res =
+          await releaseRepo.pair(serverUrl: 'http://srv.example', otp: '482910', deviceName: 'Pixel');
+
+      expect(res, isA<Err<void>>());
+      expect((res as Err<void>).failure, isA<ValidationFailure>());
+      verifyNever(() => dio.post<dynamic>(any(), data: any(named: 'data'), options: any(named: 'options')));
     });
 
     test('a 4xx error surfaces as a Failure (error path unaffected by unwrapping)', () async {

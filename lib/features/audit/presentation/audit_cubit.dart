@@ -20,7 +20,7 @@ class AuditState extends Equatable {
   final List<AuditEntry> entries;
   final AuditFilter filter;
 
-  /// Entries matching the active [filter] (Issues = failed; Synced = approved).
+  /// Entries matching the active [filter] (Issues = failed or received-with-issue; Synced = approved).
   List<AuditEntry> get visible {
     switch (filter) {
       case AuditFilter.all:
@@ -63,7 +63,7 @@ class AuditCubit extends Cubit<AuditState> {
 
   void setFilter(AuditFilter filter) => emit(state.copyWith(filter: filter));
 
-  /// Removes the failed rows the user chose to clear, then refreshes.
+  /// Removes failed and received-with-issue rows the user chose to clear, then refreshes.
   Future<void> clearFailed() async {
     await _queue.deleteFailed();
     await load();

@@ -143,16 +143,31 @@ class _FakeQueue implements SmsQueueStore {
   }
 
   @override
+  Future<void> markReceivedWithIssue(int localId, String? serverRef, String reason) async {
+    final int i = items.indexWhere((QueuedSms q) => q.localId == localId);
+    if (i >= 0) {
+      items[i] = items[i].copyWith(
+        status: SyncStatus.receivedWithIssue,
+        serverRef: serverRef,
+        failureReason: reason,
+      );
+    }
+  }
+
+  @override
   Future<int> purgeApproved(DateTime olderThan) async {
     final int before = items.length;
-    items.removeWhere((QueuedSms q) => q.status == SyncStatus.approved && q.createdAt.isBefore(olderThan));
+    items.removeWhere((QueuedSms q) =>
+        (q.status == SyncStatus.approved || q.status == SyncStatus.receivedWithIssue) &&
+        q.createdAt.isBefore(olderThan));
     return before - items.length;
   }
 
   @override
   Future<int> deleteFailed() async {
     final int before = items.length;
-    items.removeWhere((QueuedSms q) => q.status == SyncStatus.failed);
+    items.removeWhere((QueuedSms q) =>
+        q.status == SyncStatus.failed || q.status == SyncStatus.receivedWithIssue);
     return before - items.length;
   }
 
@@ -208,6 +223,9 @@ class _ThrowOnNthEnqueue implements SmsQueueStore {
 
   @override
   Future<void> markFailed(int localId, String reason) async {}
+
+  @override
+  Future<void> markReceivedWithIssue(int localId, String? serverRef, String reason) async {}
 
   @override
   Future<int> purgeApproved(DateTime olderThan) async => 0;
