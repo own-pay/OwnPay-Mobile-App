@@ -4,9 +4,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/storage/local_wipe.dart';
 import '../../../core/storage/secure_store.dart';
 import '../../pairing/data/device_repository.dart';
+import '../../sms_capture/data/sms_ingest_coordinator.dart';
 import '../../privacy_gate/data/sender_overrides.dart';
 import '../../privacy_gate/domain/filter_rules.dart';
+import '../../privacy_gate/domain/filter_rules_health.dart';
 import '../../privacy_gate/domain/filter_rules_repository.dart';
+import '../../sync/domain/sync_health.dart';
+import '../../sync/domain/syncer.dart';
 
 enum SettingsStatus { idle, wiping, wiped }
 
@@ -19,6 +23,8 @@ class SettingsState extends Equatable {
     this.disabledSenders = const <String>{},
     this.rulesLoaded = false,
     this.syncing = false,
+    this.rulesHealth = const FilterRulesHealthSnapshot(),
+    this.syncHealth = const SyncHealthSnapshot(),
   });
 
   final String? serverUrl;
@@ -38,6 +44,12 @@ class SettingsState extends Equatable {
   /// True while a "sync from admin panel" force-refresh is in flight.
   final bool syncing;
 
+  /// Non-sensitive status of the server-provided whitelist.
+  final FilterRulesHealthSnapshot rulesHealth;
+
+  /// Non-sensitive status of the mobile-to-web SMS queue.
+  final SyncHealthSnapshot syncHealth;
+
   /// Whether [sender] is currently active on this device (server-whitelisted AND not locally disabled).
   bool isEnabled(String sender) => !disabledSenders.contains(sender.trim().toLowerCase());
 
@@ -49,6 +61,8 @@ class SettingsState extends Equatable {
     Set<String>? disabledSenders,
     bool? rulesLoaded,
     bool? syncing,
+    FilterRulesHealthSnapshot? rulesHealth,
+    SyncHealthSnapshot? syncHealth,
   }) =>
       SettingsState(
         serverUrl: serverUrl ?? this.serverUrl,
@@ -58,25 +72,66 @@ class SettingsState extends Equatable {
         disabledSenders: disabledSenders ?? this.disabledSenders,
         rulesLoaded: rulesLoaded ?? this.rulesLoaded,
         syncing: syncing ?? this.syncing,
+        rulesHealth: rulesHealth ?? this.rulesHealth,
+        syncHealth: syncHealth ?? this.syncHealth,
       );
 
   @override
-  List<Object?> get props =>
-      <Object?>[serverUrl, deviceUuid, status, senders, disabledSenders, rulesLoaded, syncing];
+  List<Object?> get props => <Object?>[
+        serverUrl,
+        deviceUuid,
+        status,
+        senders,
+        disabledSenders,
+        rulesLoaded,
+        syncing,
+        rulesHealth,
+        syncHealth,
+      ];
 }
 
 /// Drives the settings screen: device info, the SMS-source whitelist (with per-sender on-device
 /// disable + "sync from admin panel"), and the "revoke & wipe" — revoke this device on the server
 /// (best-effort) then clear ALL local data so nothing recoverable remains.
 class SettingsCubit extends Cubit<SettingsState> {
-  SettingsCubit(this._store, this._devices, this._wipe, this._rules, this._overrides)
-      : super(const SettingsState());
+  SettingsCubit(this._store, this._devices, this._wipe, this._rules, this._overrides, {
+    this._rulesHealth,
+    this._syncHealth,
+    this._ingest,
+    this._sync,
+  }) : super(const SettingsState()) {
+    _rulesHealth?.health.addListener(_onRulesHealthChanged);
+    _syncHealth?.health.addListener(_onSyncHealthChanged);
+  }
 
   final SecureStore _store;
   final DeviceRepository _devices;
   final LocalWipe _wipe;
   final FilterRulesRepository _rules;
   final SenderOverrides _overrides;
+  final FilterRulesHealthSource? _rulesHealth;
+  final SyncHealthSource? _syncHealth;
+  final SmsIngestCoordinator? _ingest;
+  final Syncer? _sync;
+
+  void _onRulesHealthChanged() {
+    if (!isClosed && _rulesHealth != null) {
+      emit(state.copyWith(rulesHealth: _rulesHealth.health.value));
+    }
+  }
+
+  void _onSyncHealthChanged() {
+    if (!isClosed && _syncHealth != null) {
+      emit(state.copyWith(syncHealth: _syncHealth.health.value));
+    }
+  }
+
+  @override
+  Future<void> close() {
+    _rulesHealth?.health.removeListener(_onRulesHealthChanged);
+    _syncHealth?.health.removeListener(_onSyncHealthChanged);
+    return super.close();
+  }
 
   Future<void> load() async {
     emit(state.copyWith(
@@ -93,6 +148,8 @@ class SettingsCubit extends Cubit<SettingsState> {
       senders: rules?.allowedSenders ?? const <String>[],
       disabledSenders: disabled,
       rulesLoaded: true,
+      rulesHealth: _rulesHealth?.health.value,
+      syncHealth: _syncHealth?.health.value,
     ));
   }
 
@@ -103,16 +160,41 @@ class SettingsCubit extends Cubit<SettingsState> {
   }
 
   /// Force-refetches the whitelist from the paired server ("sync from admin panel"). Keeps the current
-  /// list if the server is unreachable.
+  /// list if the server is unreachable, while still using a fresh cache if one is available.
   Future<void> syncFromAdmin() async {
     emit(state.copyWith(syncing: true));
-    final FilterRules? rules = await _rules.forceRefresh();
-    emit(state.copyWith(
-      senders: rules?.allowedSenders ?? state.senders,
-      disabledSenders: await _overrides.disabled(),
-      rulesLoaded: true,
-      syncing: false,
-    ));
+    FilterRules? rules;
+    try {
+      final FilterRules? refreshed = await _rules.forceRefresh();
+      final FilterRulesHealthStatus refreshStatus =
+          _rulesHealth?.health.value.status ?? FilterRulesHealthStatus.unknown;
+      // A fresh cache may be used only after a transient availability failure. An explicit empty or
+      // malformed server response must never be masked by the old whitelist.
+      final bool mayUseFreshCache =
+          refreshed == null && refreshStatus == FilterRulesHealthStatus.unavailable;
+      rules = refreshed ?? (mayUseFreshCache ? await _rules.effectiveRules() : null);
+      if (rules != null) {
+        // A usable rules set can unblock SMS that arrived while the whitelist was unavailable.
+        // Re-drain the durable native buffer first, then force the existing queue worker to upload it.
+        await _ingest?.drainNow();
+        await _sync?.syncNow(force: true);
+      }
+    } finally {
+      Set<String> disabledSenders = state.disabledSenders;
+      try {
+        disabledSenders = await _overrides.disabled();
+      } catch (_) {
+        // Preserve the last known local overrides; cleanup must still clear the spinner.
+      }
+      emit(state.copyWith(
+        senders: rules?.allowedSenders ?? state.senders,
+        disabledSenders: disabledSenders,
+        rulesLoaded: true,
+        syncing: false,
+        rulesHealth: _rulesHealth?.health.value,
+        syncHealth: _syncHealth?.health.value,
+      ));
+    }
   }
 
   Future<void> revokeAndWipe() async {

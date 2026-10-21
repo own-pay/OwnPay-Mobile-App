@@ -95,14 +95,14 @@ class _AuditViewState extends State<AuditView> {
                       children: <Widget>[
                         Expanded(
                           child: Text(
-                            '${state.failedCount} failed to sync',
+                            '${state.failedCount} issue(s) need attention',
                             style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                           ),
                         ),
                         TextButton.icon(
                           onPressed: () => _confirmClear(context, cubit),
                           icon: const Icon(Icons.delete_sweep_outlined, color: AppColors.danger),
-                          label: const Text('Clear failed', style: TextStyle(color: AppColors.danger)),
+                          label: const Text('Clear issues', style: TextStyle(color: AppColors.danger)),
                         ),
                       ],
                     ),
@@ -139,8 +139,8 @@ class _AuditViewState extends State<AuditView> {
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
-        title: const Text('Clear failed?'),
-        content: const Text('Remove all failed entries from the queue. They will no longer be retried.'),
+        title: const Text('Clear issues?'),
+        content: const Text('Remove failed entries and received-with-issue entries from the queue. Failed entries will no longer be retried.'),
         actions: <Widget>[
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Clear')),
@@ -184,7 +184,7 @@ class _AuditTile extends StatelessWidget {
           '${l10n.formatTimeOfDay(TimeOfDay.fromDateTime(entry.receivedAt))}',
       if (entry.isIssue && (entry.failureReason?.isNotEmpty ?? false)) entry.failureReason!,
       if (entry.isIssue && entry.retryCount > 0) 'retry ${entry.retryCount}',
-      if (entry.isSynced && entry.serverRef != null) 'ref ${entry.serverRef}',
+      if ((entry.isSynced || entry.isReceivedWithIssue) && entry.serverRef != null) 'ref ${entry.serverRef}',
     ];
 
     return ListTile(
@@ -331,5 +331,7 @@ _StatusStyle _styleFor(SyncStatus status) {
       return const _StatusStyle(AppColors.danger, 'Failed', Icons.error_outline);
     case SyncStatus.pending:
       return const _StatusStyle(AppColors.warning, 'Queued', Icons.schedule);
+    case SyncStatus.receivedWithIssue:
+      return const _StatusStyle(AppColors.warning, 'Received; review', Icons.warning_amber_rounded);
   }
 }

@@ -18,12 +18,18 @@ void main() {
       expect(item(status: SyncStatus.pending).isSyncable, isTrue);
       expect(item(status: SyncStatus.failed).isSyncable, isTrue);
       expect(item(status: SyncStatus.approved).isSyncable, isFalse);
+      expect(item(status: SyncStatus.receivedWithIssue).isSyncable, isFalse);
     });
 
     test('status serializes by name (order-independent), not by index', () {
       expect(item(status: SyncStatus.failed).toMap()['status'], 'failed');
       expect(item(status: SyncStatus.approved).toMap()['status'], 'approved');
+      expect(item(status: SyncStatus.receivedWithIssue).toMap()['status'], 'receivedWithIssue');
       expect(QueuedSms.fromMap(item(status: SyncStatus.approved).toMap()).status, SyncStatus.approved);
+      expect(
+        QueuedSms.fromMap(item(status: SyncStatus.receivedWithIssue).toMap()).status,
+        SyncStatus.receivedWithIssue,
+      );
       // Unknown/garbled stored status falls back to pending (re-synced, never lost).
       final Map<String, dynamic> corrupt = item().toMap()..['status'] = 'bogus';
       expect(QueuedSms.fromMap(corrupt).status, SyncStatus.pending);

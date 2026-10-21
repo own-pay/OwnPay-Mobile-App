@@ -36,7 +36,8 @@ class AuditEntry extends Equatable {
   final String? serverRef;
 
   bool get isSynced => status == SyncStatus.approved;
-  bool get isIssue => status == SyncStatus.failed;
+  bool get isIssue => status == SyncStatus.failed || status == SyncStatus.receivedWithIssue;
+  bool get isReceivedWithIssue => status == SyncStatus.receivedWithIssue;
 
   @override
   List<Object?> get props =>

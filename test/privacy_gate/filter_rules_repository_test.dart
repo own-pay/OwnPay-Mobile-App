@@ -7,6 +7,7 @@ import 'package:ownpay_console/core/storage/secure_store.dart';
 import 'package:ownpay_console/features/privacy_gate/data/filter_rules_cache.dart';
 import 'package:ownpay_console/features/privacy_gate/data/network_filter_rules_repository.dart';
 import 'package:ownpay_console/features/privacy_gate/domain/filter_rules.dart';
+import 'package:ownpay_console/features/privacy_gate/domain/filter_rules_health.dart';
 
 class _MockApiClient extends Mock implements ApiClient {}
 
@@ -188,5 +189,58 @@ void main() {
     expect(result, isNull);
     expect(cache.writes, 0);
     expect(cache.stored!.allowedSenders, <String>['Nagad']); // untouched
+  });
+
+  test('reports READY health when usable rules are fetched', () async {
+    when(() => api.get(any())).thenAnswer((_) async => Ok<Map<String, dynamic>>(rulesBody()));
+
+    final NetworkFilterRulesRepository repository = build();
+    final FilterRules? result = await repository.effectiveRules();
+
+    expect(result, isNotNull);
+    expect(repository.health.value.status, FilterRulesHealthStatus.ready);
+    expect(repository.health.value.message, contains('2'));
+  });
+
+  test('reports EMPTY health when the server returns no allowed senders', () async {
+    when(() => api.get(any())).thenAnswer(
+      (_) async => Ok<Map<String, dynamic>>(rulesBody(senders: const <String>[])),
+    );
+
+    final NetworkFilterRulesRepository repository = build();
+    final FilterRules? result = await repository.effectiveRules();
+
+    expect(result, isNull);
+    expect(repository.health.value.status, FilterRulesHealthStatus.empty);
+  });
+
+  test('reports UNAVAILABLE health when the server cannot be reached', () async {
+    when(() => api.get(any())).thenAnswer((_) async => const Err<Map<String, dynamic>>(NetworkFailure()));
+
+    final NetworkFilterRulesRepository repository = build();
+    final FilterRules? result = await repository.effectiveRules();
+
+    expect(result, isNull);
+    expect(repository.health.value.status, FilterRulesHealthStatus.unavailable);
+  });
+
+  test('reports MALFORMED health when the server omits allowed_senders', () async {
+    when(() => api.get(any())).thenAnswer(
+      (_) async => const Ok<Map<String, dynamic>>(<String, dynamic>{'version': 1}),
+    );
+
+    final NetworkFilterRulesRepository repository = build();
+    await repository.effectiveRules();
+
+    expect(repository.health.value.status, FilterRulesHealthStatus.malformed);
+  });
+
+  test('reports AUTH_REQUIRED health when the server authorization expires', () async {
+    when(() => api.get(any())).thenAnswer((_) async => const Err<Map<String, dynamic>>(AuthFailure()));
+
+    final NetworkFilterRulesRepository repository = build();
+    await repository.effectiveRules();
+
+    expect(repository.health.value.status, FilterRulesHealthStatus.authRequired);
   });
 }

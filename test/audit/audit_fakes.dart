@@ -62,16 +62,29 @@ class FakeSmsQueueStore implements SmsQueueStore {
   }
 
   @override
+  Future<void> markReceivedWithIssue(int localId, String? serverRef, String reason) async {
+    final QueuedSms r = rows.firstWhere((QueuedSms q) => q.localId == localId);
+    _replace(r.copyWith(
+      status: SyncStatus.receivedWithIssue,
+      serverRef: serverRef,
+      failureReason: reason,
+    ));
+  }
+
+  @override
   Future<int> purgeApproved(DateTime olderThan) async {
     final int before = rows.length;
-    rows.removeWhere((QueuedSms q) => q.status == SyncStatus.approved && q.createdAt.isBefore(olderThan));
+    rows.removeWhere((QueuedSms q) =>
+        (q.status == SyncStatus.approved || q.status == SyncStatus.receivedWithIssue) &&
+        q.createdAt.isBefore(olderThan));
     return before - rows.length;
   }
 
   @override
   Future<int> deleteFailed() async {
     final int before = rows.length;
-    rows.removeWhere((QueuedSms q) => q.status == SyncStatus.failed);
+    rows.removeWhere((QueuedSms q) =>
+        q.status == SyncStatus.failed || q.status == SyncStatus.receivedWithIssue);
     return before - rows.length;
   }
 

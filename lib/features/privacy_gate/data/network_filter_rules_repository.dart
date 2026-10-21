@@ -1,9 +1,12 @@
+import 'package:flutter/foundation.dart';
+
 import '../../../core/config/app_config.dart';
 import '../../../core/error/failure.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_result.dart';
 import '../../../core/storage/secure_store.dart';
 import '../domain/filter_rules.dart';
+import '../domain/filter_rules_health.dart';
 import '../domain/filter_rules_repository.dart';
 import 'filter_rules_cache.dart';
 
@@ -12,7 +15,7 @@ import 'filter_rules_cache.dart';
 ///
 /// Fail-closed by construction (see [effectiveRules]): a missing/expired cache that cannot be
 /// refreshed yields `null`, and a stale cache is never served.
-class NetworkFilterRulesRepository implements FilterRulesRepository {
+class NetworkFilterRulesRepository implements FilterRulesRepository, FilterRulesHealthSource {
   NetworkFilterRulesRepository(
     this._api,
     this._store,
@@ -24,6 +27,11 @@ class NetworkFilterRulesRepository implements FilterRulesRepository {
   final SecureStore _store;
   final FilterRulesCache _cache;
   final DateTime Function() _now;
+  final ValueNotifier<FilterRulesHealthSnapshot> _health =
+      ValueNotifier<FilterRulesHealthSnapshot>(const FilterRulesHealthSnapshot());
+
+  @override
+  ValueListenable<FilterRulesHealthSnapshot> get health => _health;
 
   @override
   Future<FilterRules?> effectiveRules() async {
@@ -35,6 +43,10 @@ class NetworkFilterRulesRepository implements FilterRulesRepository {
     // configured/fixed.
     final FilterRules? cached = await _cache.read();
     if (cached != null && !cached.isStale(now) && !cached.isFailClosed) {
+      _setHealth(
+        FilterRulesHealthStatus.ready,
+        'SMS sources ready (${cached.allowedSenders.length}).',
+      );
       return cached;
     }
 
@@ -65,12 +77,19 @@ class NetworkFilterRulesRepository implements FilterRulesRepository {
   Future<FilterRules?> _fetch(DateTime now) async {
     final String? base = await _store.readServerUrl();
     if (base == null || base.isEmpty) {
+      _setHealth(
+        FilterRulesHealthStatus.unavailable,
+        'No paired server URL. Re-pair this device.',
+      );
       return null;
     }
     final ApiResult<Map<String, dynamic>> res =
         await _api.get('$base${AppConfig.apiPrefix}/config/filter-rules');
     return res.fold<FilterRules?>(
-      (Failure _) => null,
+      (Failure failure) {
+        _setHealth(_healthStatusForFailure(failure), _friendlyFailure(failure));
+        return null;
+      },
       (Map<String, dynamic> body) => _parse(body, now),
     );
   }
@@ -82,9 +101,46 @@ class NetworkFilterRulesRepository implements FilterRulesRepository {
   /// server is configured/fixed. Once real senders arrive, the rules cache normally.
   FilterRules? _parse(Map<String, dynamic> body, DateTime now) {
     if (!body.containsKey('allowed_senders')) {
+      _setHealth(
+        FilterRulesHealthStatus.malformed,
+        'The server returned no SMS-source configuration.',
+      );
       return null;
     }
     final FilterRules rules = FilterRules.fromApi(body, fetchedAt: now);
-    return rules.isFailClosed ? null : rules;
+    if (rules.isFailClosed) {
+      _setHealth(
+        FilterRulesHealthStatus.empty,
+        'No SMS sources are configured on the OwnPay server.',
+      );
+      return null;
+    }
+    _setHealth(
+      FilterRulesHealthStatus.ready,
+      'SMS sources ready (${rules.allowedSenders.length}).',
+    );
+    return rules;
   }
+
+  void _setHealth(FilterRulesHealthStatus status, String message) {
+    _health.value = FilterRulesHealthSnapshot(
+      status: status,
+      message: message,
+      updatedAt: _now(),
+    );
+  }
+
+  FilterRulesHealthStatus _healthStatusForFailure(Failure failure) => switch (failure) {
+        AuthFailure() => FilterRulesHealthStatus.authRequired,
+        ValidationFailure() => FilterRulesHealthStatus.malformed,
+        _ => FilterRulesHealthStatus.unavailable,
+      };
+
+  String _friendlyFailure(Failure failure) => switch (failure) {
+        NetworkFailure() => 'OwnPay server is unreachable. SMS will stay queued and retry.',
+        AuthFailure() => 'Device authorization expired. Re-pair this device.',
+        ValidationFailure() => 'OwnPay rejected the SMS-source request.',
+        ServerFailure() => 'OwnPay could not provide SMS sources. Try again later.',
+        _ => 'Could not load SMS sources. Check the server connection.',
+      };
 }
