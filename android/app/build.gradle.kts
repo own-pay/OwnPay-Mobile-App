@@ -40,22 +40,27 @@ android {
 
     signingConfigs {
         create("release") {
-            if (!keystorePropertiesFile.exists()) {
+            // Fail-fast is limited to release builds; debug uses the debug keystore and needs no
+            // keystore.properties, so the check must not fire when a debug/profiling build is requested.
+            val isReleaseBuild = gradle.startParameter.taskNames.any { Regex("[Rr]elease").containsMatchIn(it) }
+            if (!keystorePropertiesFile.exists() && isReleaseBuild) {
                 throw GradleException(
                     "Release signing is not configured: android/keystore.properties is missing. " +
                         "Copy keystore.properties.example to keystore.properties and provide the " +
                         "OwnPay Console upload key, or build a debug artifact instead.",
                 )
             }
-            val props = Properties()
-            keystorePropertiesFile.inputStream().use { props.load(it) }
-            fun required(name: String): String =
-                props.getProperty(name)?.takeIf { it.isNotBlank() }
-                    ?: throw GradleException("keystore.properties is missing required entry '$name'.")
-            storeFile = rootProject.file(required("storeFile"))
-            storePassword = required("storePassword")
-            keyAlias = required("keyAlias")
-            keyPassword = required("keyPassword")
+            if (keystorePropertiesFile.exists()) {
+                val props = Properties()
+                keystorePropertiesFile.inputStream().use { props.load(it) }
+                fun required(name: String): String =
+                    props.getProperty(name)?.takeIf { it.isNotBlank() }
+                        ?: throw GradleException("keystore.properties is missing required entry '$name'.")
+                storeFile = rootProject.file(required("storeFile"))
+                storePassword = required("storePassword")
+                keyAlias = required("keyAlias")
+                keyPassword = required("keyPassword")
+            }
         }
     }
 
