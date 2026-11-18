@@ -35,6 +35,10 @@ class _PairingViewState extends State<_PairingView> {
   final TextEditingController _otpCtrl = TextEditingController();
   final TextEditingController _nameCtrl = TextEditingController(text: 'My Android device');
 
+  /// SPKI fingerprint carried by the scanned QR for self-signed hosts. Null for standard CA-signed
+  /// servers (the common case); set only when the QR opts into pinning.
+  String? _spkiFingerprint;
+
   @override
   void dispose() {
     _serverCtrl.dispose();
@@ -48,6 +52,7 @@ class _PairingViewState extends State<_PairingView> {
           serverUrl: _serverCtrl.text,
           otp: _otpCtrl.text,
           deviceName: _nameCtrl.text,
+          spkiFingerprint: _spkiFingerprint,
         );
   }
 
@@ -56,9 +61,55 @@ class _PairingViewState extends State<_PairingView> {
       MaterialPageRoute<Map<String, String>>(builder: (_) => const QrScanScreen()),
     );
     if (!mounted || result == null) return;
+    final String? spki = result['spki'];
+    if (spki != null) {
+      // QR carries a fingerprint for a self-signed server: pin it only after the user confirms.
+      final bool ok = await _confirmSelfSignedPin(spki);
+      if (!ok || !mounted) return;
+      _spkiFingerprint = spki;
+    } else {
+      _spkiFingerprint = null;
+    }
     _serverCtrl.text = result['server_url'] ?? '';
     _otpCtrl.text = result['otp'] ?? '';
     _submit();
+  }
+
+  Future<bool> _confirmSelfSignedPin(String fingerprint) async {
+    final String fingerprintShort = fingerprint.length >= 16
+        ? '${fingerprint.substring(0, 16)}…'
+        : fingerprint;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Self-signed server certificate'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              'This server uses a certificate that is not publicly trusted. '
+              'The app will pin its public key and refuse any other certificate from it.',
+            ),
+            const SizedBox(height: 12),
+            const Text('Fingerprint (SHA-256):', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            SelectableText(fingerprintShort, style: const TextStyle(fontFamily: 'monospace')),
+            const SizedBox(height: 12),
+            const Text(
+              'Verify the fingerprint out-of-band (for example, on the server itself) before trusting it. '
+              'If the server later presents a different key, the app will refuse to connect — '
+              'you will need to re-pair to pin the new key.',
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Trust & pin')),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   @override

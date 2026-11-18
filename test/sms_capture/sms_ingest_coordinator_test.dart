@@ -51,6 +51,15 @@ class _FakeCapture implements SmsCapture {
   }
 
   @override
+  Future<int> getDroppedOverflowCount() async => 0;
+
+  @override
+  Future<int> getDroppedFilteredCount() async => 0;
+
+  @override
+  Future<void> setAllowedSenders(List<String> senders) async {}
+
+  @override
   Stream<void> get onPending => _pending.stream;
 
   @override

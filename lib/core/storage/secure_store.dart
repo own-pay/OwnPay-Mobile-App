@@ -34,10 +34,21 @@ class SecureStore {
   Future<void> setAccessToken(String value) => _storage.write(key: AppConfig.ssAccessToken, value: value);
   Future<void> setRefreshToken(String value) => _storage.write(key: AppConfig.ssRefreshToken, value: value);
 
-  /// TOFU-pinned server certificate fingerprint (release cert pinning). Cleared by [clear] on wipe, so a
+  /// SPKI (subject public key info) SHA-256 fingerprint pin. Cleared by [clear] on wipe, so a
   /// re-pair re-pins (the documented re-pin path for server cert rotation).
   Future<String?> readCertPin() => _storage.read(key: AppConfig.ssCertPin);
   Future<void> setCertPin(String value) => _storage.write(key: AppConfig.ssCertPin, value: value);
+
+  /// Host the TOFU pin is bound to (see CertificatePinner). When unset, the pin is
+  /// host-agnostic (pre-pairing) and only the fingerprint is enforced.
+  Future<String?> readCertPinHost() => _storage.read(key: AppConfig.ssCertPinHost);
+  Future<void> setCertPinHost(String value) => _storage.write(key: AppConfig.ssCertPinHost, value: value);
+
+  /// Deletes only the certificate pin and its host binding. Everything else stays.
+  Future<void> clearCertPin() async {
+    await _storage.delete(key: AppConfig.ssCertPin);
+    await _storage.delete(key: AppConfig.ssCertPinHost);
+  }
 
   /// True once a device has paired (has both a server and an access token).
   Future<bool> isPaired() async {

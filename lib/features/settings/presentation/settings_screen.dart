@@ -7,6 +7,7 @@ import '../../../core/config/app_config.dart';
 import '../../../core/storage/local_wipe.dart';
 import '../../../core/storage/secure_store.dart';
 import '../../../shared/theme/app_theme.dart';
+import '../../sms_capture/domain/sms_capture.dart';
 import '../../pairing/data/device_repository.dart';
 import '../../privacy_gate/data/sender_overrides.dart';
 import '../../privacy_gate/domain/filter_rules_repository.dart';
@@ -26,6 +27,7 @@ class SettingsScreen extends StatelessWidget {
         sl<LocalWipe>(),
         sl<FilterRulesRepository>(),
         sl<SenderOverrides>(),
+        sl<SmsCapture>(),
       )..load(),
       child: const SettingsView(),
     );
@@ -53,6 +55,10 @@ class SettingsView extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: <Widget>[
+                if (state.droppedCount > 0) ...<Widget>[
+                  _DroppedWarningCard(count: state.droppedCount),
+                  const SizedBox(height: 12),
+                ],
                 Text('THIS DEVICE', style: AppTheme.overline.copyWith(color: AppColors.textMuted)),
                 const SizedBox(height: 10),
                 _InfoCard(
@@ -71,6 +77,18 @@ class SettingsView extends StatelessWidget {
                   onPressed: wiping ? null : () => context.push('/pair'),
                   icon: const Icon(Icons.link),
                   label: const Text('Re-pair device'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: wiping ? null : () => _confirmResetConnection(context, cubit),
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text('Reset connection & re-pair'),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Use this if your server certificate was replaced. Drops the pairing + certificate pin but '
+                  'keeps the queue, audit log and app settings on this device.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
                 FilledButton.icon(
@@ -98,6 +116,32 @@ class SettingsView extends StatelessWidget {
     );
   }
 
+  Future<void> _confirmResetConnection(BuildContext context, SettingsCubit cubit) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Reset connection?'),
+        content: const Text(
+          'Drops the server URL, credentials and certificate pin from this device. '
+          'App data (queue, audit log and settings) is kept. You will need to pair again — '
+          'scan the QR from your OwnPay admin panel like a fresh setup.',
+        ),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed ?? false) {
+      await cubit.resetConnection();
+      if (!context.mounted) return;
+      context.go('/pair');
+    }
+  }
+
   Future<void> _confirmWipe(BuildContext context, SettingsCubit cubit) async {
     final bool? confirmed = await showDialog<bool>(
       context: context,
@@ -121,6 +165,42 @@ class SettingsView extends StatelessWidget {
     if (confirmed ?? false) {
       await cubit.revokeAndWipe();
     }
+  }
+}
+
+/// Visible warning for the buffer-drop counter: counts capture-time SMS the native layer had to
+/// discard (buffer flooded, or sender not in the whitelist). Surfacing it (when > 0) so silent loss
+/// is not possible.
+class _DroppedWarningCard extends StatelessWidget {
+  const _DroppedWarningCard({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withValues(alpha: 0.12),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(Icons.warning_amber_rounded, color: AppColors.danger),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '$count SMS were dropped on this device before they could be reviewed. '
+              'If this is unexpected, contact support — do not delete app data; the server still logs arrivals.',
+              style: const TextStyle(color: AppColors.textHi, fontSize: 12, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

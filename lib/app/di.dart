@@ -71,7 +71,7 @@ Future<void> configureDependencies() async {
   sl
     ..registerSingleton<Dio>(dio)
     ..registerLazySingleton<ApiClient>(() => ApiClient(sl<Dio>()))
-    ..registerLazySingleton<DeviceRepository>(() => DeviceRepository(sl<ApiClient>(), sl<SecureStore>()));
+    ..registerLazySingleton<DeviceRepository>(() => DeviceRepository(sl<ApiClient>(), sl<SecureStore>(), sl<CertificatePinner>()));
 
   // Capture-consumer pipeline (increment 5): rules source → gate → encrypt → queue.
   sl
@@ -83,6 +83,8 @@ Future<void> configureDependencies() async {
         sl<ApiClient>(),
         sl<SecureStore>(),
         sl<FilterRulesCache>(),
+        DateTime.now,
+        sl<SmsCapture>(),
       ),
     )
     ..registerLazySingleton<SmsQueueStore>(HiveSmsQueueStore.new)
@@ -136,17 +138,30 @@ Future<void> configureDependencies() async {
     ),
   );
 
-  // Release-only TLS certificate pinning (TOFU): trust only the leaf cert pinned on first connection.
-  // Debug keeps normal CA validation so a local/self-hosted dev server works. (SECURITY.md §5.)
+  // Release-only TLS handling, in two modes chosen per request by which callback fires:
+  //
+  // 1. DEFAULT (most self-hosted installs, publicly trusted cert): the platform's normal
+  //    validation pipeline (system trusted CAs + hostname validation). For a publicly trusted
+  //    host, badCertificateCallback is never consulted and everything validates as usual —
+  //    including renewals.
+  //
+  // 2. PIN MODE (self-hosted with self-signed or private-CA certs): the system store rejects
+  //    the chain (custom root pinning is what makes this "self-signed"), so badCertificateCallback
+  //    IS consulted. It admits exactly the pinned SPKI for the pinned host and nothing else;
+  //    a mismatch therefore fails the handshake — hard fail, no silent acceptance, and never a
+  //    fallback to the system store.
   if (kReleaseMode) {
     dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
-        final HttpClient client = HttpClient(context: SecurityContext(withTrustedRoots: false));
-        client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+        final HttpClient client = HttpClient();
+        // Intentionally no custom SecurityContext: system roots remain authoritative for the
+        // default path. badCertificateCallback only matters when the default chain fails.
+        client.badCertificateCallback = (X509Certificate cert, String host, int port) =>
+            sl<CertificatePinner>().allows(cert, host);
         return client;
       },
       validateCertificate: (X509Certificate? cert, String host, int port) =>
-          sl<CertificatePinner>().allows(cert),
+          sl<CertificatePinner>().allows(cert, host),
     );
   }
 }

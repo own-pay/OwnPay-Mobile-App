@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import '../../../core/crypto/aes_gcm_cipher.dart';
 import '../../../core/storage/secure_store.dart';
@@ -69,6 +70,12 @@ class SmsIngestCoordinator {
         _rerun = false;
         await _drainOnce();
       } while (_rerun);
+      // Overflow counter is a coarse health signal, not message data — safe to log.
+      final int dropped = await _capture.getDroppedOverflowCount();
+      if (dropped > 0) {
+        developer.log('native SMS buffer evicted $dropped unread message(s) while full',
+            name: 'ownpay.sms_capture');
+      }
     } finally {
       _draining = false;
     }

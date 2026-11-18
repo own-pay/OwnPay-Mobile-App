@@ -28,6 +28,7 @@ class PairingCubit extends Cubit<PairingState> {
     required String serverUrl,
     required String otp,
     required String deviceName,
+    String? spkiFingerprint,
   }) async {
     if (serverUrl.trim().isEmpty || otp.trim().isEmpty) {
       emit(const PairingState(
@@ -43,6 +44,7 @@ class PairingCubit extends Cubit<PairingState> {
       serverUrl: serverUrl,
       otp: otp.trim(),
       deviceName: deviceName.trim().isEmpty ? 'Android device' : deviceName.trim(),
+      spkiFingerprint: spkiFingerprint,
     );
 
     switch (result) {

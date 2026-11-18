@@ -8,6 +8,7 @@ import 'package:ownpay_console/features/pairing/data/device_repository.dart';
 import 'package:ownpay_console/features/privacy_gate/data/sender_overrides.dart';
 import 'package:ownpay_console/features/privacy_gate/domain/filter_rules_repository.dart';
 import 'package:ownpay_console/features/settings/presentation/settings_cubit.dart';
+import 'package:ownpay_console/features/sms_capture/domain/sms_capture.dart';
 
 class _MockSecureStore extends Mock implements SecureStore {}
 
@@ -19,12 +20,15 @@ class _MockRules extends Mock implements FilterRulesRepository {}
 
 class _MockOverrides extends Mock implements SenderOverrides {}
 
+class _MockCapture extends Mock implements SmsCapture {}
+
 void main() {
   late _MockSecureStore store;
   late _MockDeviceRepository devices;
   late _MockLocalWipe wipe;
   late _MockRules rules;
   late _MockOverrides overrides;
+  late _MockCapture capture;
 
   setUp(() {
     store = _MockSecureStore();
@@ -32,12 +36,15 @@ void main() {
     wipe = _MockLocalWipe();
     rules = _MockRules();
     overrides = _MockOverrides();
+    capture = _MockCapture();
+    when(() => capture.getDroppedOverflowCount()).thenAnswer((_) async => 0);
+    when(() => capture.getDroppedFilteredCount()).thenAnswer((_) async => 0);
     when(() => wipe.wipe()).thenAnswer((_) async {});
     when(() => rules.effectiveRules()).thenAnswer((_) async => null);
     when(() => overrides.disabled()).thenAnswer((_) async => <String>{});
   });
 
-  SettingsCubit build() => SettingsCubit(store, devices, wipe, rules, overrides);
+  SettingsCubit build() => SettingsCubit(store, devices, wipe, rules, overrides, capture);
 
   test('load reads device info from secure storage', () async {
     when(() => store.readServerUrl()).thenAnswer((_) async => 'https://srv');

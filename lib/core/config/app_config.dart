@@ -40,6 +40,12 @@ class AppConfig {
   static const String ssDeviceUuid = 'device_uuid';
   static const String ssDeviceId = 'device_id_local';
 
-  /// TOFU-pinned server leaf-cert SHA-256 fingerprint (release cert pinning).
-  static const String ssCertPin = 'cert_pin_sha256';
+  /// SPKI (subject public key info) SHA-256 fingerprint pin for the server. Unlike pinning the
+  /// leaf certificate, this stays stable across cert renewals that reuse the same key — the only
+  /// mode in which a self-signed server can be pinned. See CertificatePinner.
+  static const String ssCertPin = 'spki_pin_sha256';
+
+  /// Host the TOFU pin is bound to. Persisted alongside the fingerprint so a pinned
+  /// cert is never accepted on a different host.
+  static const String ssCertPinHost = 'cert_pin_sha256_host';
 }

@@ -66,9 +66,9 @@ To build the app yourself, make sure you have the [Flutter SDK](https://docs.flu
 #### Prerequisites
 
 * Flutter SDK (stable channel)
-* Android SDK (for Android builds, SDK version 34+)
+* Android SDK (compileSdk/targetSdk 37, Android 17) with Gradle 9.x (see `android/gradle/wrapper/gradle-wrapper.properties`) and the matching Android Gradle Plugin (see `android/settings.gradle.kts`)
 * Xcode & CocoaPods (for iOS builds, macOS required)
-* Java Development Kit (JDK 17+)
+* Java Development Kit (JDK 21+)
 
 #### 1. Setup
 
@@ -98,14 +98,20 @@ flutter test
 
 #### 4. Building the Production Release (Android APK & App Bundle)
 
-Before building, set up your Android release signing key. Create a file named `android/key.properties` (this file is git-ignored):
+Before building, set up your Android release signing key. Copy `android/keystore.properties.example`
+to `android/keystore.properties` (this file is git-ignored) and fill it in:
 
 ```properties
+storeFile=app/upload-keystore.jks
 storePassword=your-keystore-password
-keyPassword=your-key-password
 keyAlias=your-key-alias
-storeFile=/path/to/your/keystore.jks
+keyPassword=your-key-password
 ```
+
+`storeFile` is resolved relative to the Android project root; the example uses `app/upload-keystore.jks`.
+
+Release builds **fail fast** with a clear error if `android/keystore.properties` is missing or incomplete, instead
+of silently shipping a debug-signed artifact. Debug builds use a throwaway debug key and work out of the box.
 
 Build the release APK:
 

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import '../../../core/config/app_config.dart';
 import '../../../core/error/failure.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_result.dart';
 import '../../../core/storage/secure_store.dart';
+import '../../sms_capture/domain/sms_capture.dart';
 import '../domain/filter_rules.dart';
 import '../domain/filter_rules_repository.dart';
 import 'filter_rules_cache.dart';
@@ -18,12 +21,17 @@ class NetworkFilterRulesRepository implements FilterRulesRepository {
     this._store,
     this._cache, [
     this._now = DateTime.now,
+    this._capture,
   ]);
 
   final ApiClient _api;
   final SecureStore _store;
   final FilterRulesCache _cache;
   final DateTime Function() _now;
+
+  /// Native SMS capture sink - used to mirror the sender whitelist into the Kotlin receiver
+  /// so non-whitelisted senders are discarded at the receiver instead of the buffer.
+  final SmsCapture? _capture;
 
   @override
   Future<FilterRules?> effectiveRules() async {
@@ -35,6 +43,7 @@ class NetworkFilterRulesRepository implements FilterRulesRepository {
     // configured/fixed.
     final FilterRules? cached = await _cache.read();
     if (cached != null && !cached.isStale(now) && !cached.isFailClosed) {
+      _mirrorToNative(cached);
       return cached;
     }
 
@@ -42,6 +51,7 @@ class NetworkFilterRulesRepository implements FilterRulesRepository {
     final FilterRules? fetched = await _fetch(now);
     if (fetched != null) {
       await _cache.write(fetched);
+      _mirrorToNative(fetched);
       return fetched;
     }
 
@@ -58,8 +68,18 @@ class NetworkFilterRulesRepository implements FilterRulesRepository {
     final FilterRules? fetched = await _fetch(_now());
     if (fetched != null) {
       await _cache.write(fetched);
+      _mirrorToNative(fetched);
     }
     return fetched;
+  }
+
+  /// Best-effort mirror of the whitelist into the native receiver; never throws.
+  void _mirrorToNative(FilterRules rules) {
+    final SmsCapture? capture = _capture;
+    if (capture == null) {
+      return;
+    }
+    unawaited(capture.setAllowedSenders(rules.allowedSenders));
   }
 
   Future<FilterRules?> _fetch(DateTime now) async {

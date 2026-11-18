@@ -19,6 +19,14 @@ class LocalWipe {
     AppConfig.boxSettings,
   ];
 
+  /// Connection-only reset: deletes every secure-storage key (server URL, tokens, AES key,
+  /// device id, SPKI pin) but keeps the Hive boxes (queue, filter-rules cache, dashboard
+  /// cache, audit log, settings) intact. This is the recovery path when the server's
+  /// certificate changed (e.g. renewed or re-keyed) — the user re-pairs against the new
+  /// endpoint instead of doing a full wipe.
+  Future<void> resetConnection() async {
+    await _store.clear();
+  }
   Future<void> wipe() async {
     await _store.clear();
     for (final String name in _boxes) {

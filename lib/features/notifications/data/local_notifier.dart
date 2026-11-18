@@ -36,6 +36,8 @@ class LocalNotifier implements Notifier {
       channelDescription: 'Payment confirmations and alerts from your OwnPay server',
       importance: Importance.high,
       priority: Priority.high,
+      // Amounts/TrxIDs must not surface on a locked screen (SEC-AUD).
+      visibility: NotificationVisibility.private,
     );
     await _plugin.show(
       id: notification.id,

@@ -28,6 +28,7 @@ android/.gradle/
 android/captures/
 android/local.properties
 android/key.properties        # signing config — NEVER commit
+android/keystore.properties   # own signing config for the release build — NEVER commit
 *.keystore
 *.jks
 *.md

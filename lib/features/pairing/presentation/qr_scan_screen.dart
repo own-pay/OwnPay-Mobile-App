@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-/// Scans the admin-panel pairing QR (`{"server_url":"...","otp":"..."}`) and pops the parsed
-/// `{server_url, otp}` back to the pairing screen.
+/// Scans the admin-panel pairing QR (`{"server_url":"...","otp":"..."}` and optionally
+/// `"spki":"<sha256-hex>"` for self-signed servers) and pops the parsed map back to the pairing screen.
 ///
 /// Uses the canonical `mobile_scanner` form where the [MobileScanner] widget owns its
 /// [MobileScannerController]: the widget starts the camera exactly once (auto-start) and handles
@@ -51,7 +51,12 @@ class _QrScanScreenState extends State<QrScanScreen> {
         final Object? url = obj['server_url'];
         final Object? otp = obj['otp'];
         if (url is String && otp is String) {
-          return <String, String>{'server_url': url, 'otp': otp};
+          final Map<String, String> parsed = <String, String>{'server_url': url, 'otp': otp};
+          final Object? spki = obj['spki'];
+          if (spki is String && spki.isNotEmpty) {
+            parsed['spki'] = spki;
+          }
+          return parsed;
         }
       }
     } on FormatException {
